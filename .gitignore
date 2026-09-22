@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+coverage/
+coverage-*/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+# Terraform da própria função (infra/terraform): o state e os planos salvos
+# carregam valores sensíveis em texto claro.
+*.tfstate
+*.tfstate.*
+tf*plan*
+tfdestroy*
+*.tfplan
+*.tfvars
+!**/example.tfvars
+.terraform/
+
+# O bundle de CAs do RDS é baixado no build da imagem, não versionado.
+global-bundle.pem
+
+npm-debug.log*
+.DS_Store
