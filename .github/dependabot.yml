@@ -1,0 +1,38 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Agrupado de propósito: cinco PRs de patch por semana num repositório de
+      # uma pessoa viram ruído e param de ser lidos.
+      producao:
+        dependency-type: production
+      desenvolvimento:
+        dependency-type: development
+    commit-message:
+      prefix: chore
+
+  # Actions de terceiros são pinadas por SHA (ver CONTRIBUTING R8). Sem o
+  # Dependabot, um pin por SHA vira versão congelada para sempre, inclusive
+  # quando sai correção de segurança.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: terraform
+    directories:
+      - /infra/terraform/envs/homolog
+      - /infra/terraform/envs/prod
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore

@@ -1,0 +1,19 @@
+# Mantém fim de linha e indentação consistentes entre editores. Sem isto, um PR
+# de uma linha vem com o arquivo inteiro reindentado e o diff deixa de ser legível.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Dois espaços no fim da linha são quebra de linha em Markdown — aparar aqui
+# mudaria o texto renderizado.
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{tf,tfvars,hcl}]
+indent_size = 2
