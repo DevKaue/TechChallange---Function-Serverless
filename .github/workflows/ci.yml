@@ -1,0 +1,128 @@
+name: CI
+
+# `homolog` entra nos gatilhos DESDE JÁ, antes de qualquer status check virar
+# obrigatório. O repositório-base dispara só em [develop, main]; com a branch de
+# homologação fora da lista, um PR para ela nunca dispara o CI, o check fica
+# eternamente em "Expected — Waiting for status to be reported", e com a lista de
+# bypass vazia nem o PR que consertaria isso consegue ser mergeado.
+on:
+  pull_request:
+    branches: [develop, homolog, main]
+  push:
+    branches: [develop, homolog, main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  commits:
+    name: Commits e título do PR
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Validar o título do PR
+        env:
+          TITULO: ${{ github.event.pull_request.title }}
+        run: |
+          # Com squash merge, o TÍTULO do PR é o que vira a mensagem final no
+          # develop — por isso ele é validado, e não só os commits.
+          if ! printf '%s' "$TITULO" | grep -qE '^(feat|fix|docs|chore|refactor|style|test|perf|build|ci|revert)(\([a-z0-9-]+\))?!?: .{1,}$'; then
+            echo "::error::Título fora do Conventional Commits: '$TITULO'"
+            exit 1
+          fi
+          if [ ${#TITULO} -gt 72 ]; then
+            echo "::error::Título com ${#TITULO} caracteres; o limite é 72"
+            exit 1
+          fi
+          if printf '%s' "$TITULO" | grep -qE '^(refact|refator|config|merge):'; then
+            echo "::error::Tipo proibido. Use refactor:, chore: ou ci: conforme o caso."
+            exit 1
+          fi
+
+  qualidade:
+    name: Lint, build e testes unitários
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck do código de produção
+        run: npx tsc --noEmit -p tsconfig.build.json
+
+      # BLOQUEANTE, com --max-warnings=0. O repositório-base roda o lint com
+      # `continue-on-error: true` porque carrega um baseline datado de 136 erros
+      # e 460 avisos; este repositório nasceu limpo, então copiar aquilo seria
+      # regressão deliberada no primeiro commit.
+      #
+      # Sem `--fix`, de propósito: `--fix` num runner descartável corrige em
+      # silêncio e joga o problema fora junto com o container.
+      - name: Lint
+        run: npx eslint "src/**/*.ts" --max-warnings=0
+
+      - name: Build
+        run: npm run build
+
+      - name: Testes unitários
+        run: npm run test:ci
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: coverage-unit
+          path: coverage/
+          retention-days: 7
+
+  seguranca:
+    name: Segurança
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Auditoria de dependências
+        run: npm audit --audit-level=high
+
+      - name: Nenhuma chave estática da AWS nos workflows
+        run: |
+          # Casa o USO (`secrets.AWS_...` ou `AWS_...:` como variável de
+          # ambiente), não a menção — procurar o nome solto faria este guard
+          # falhar contra o próprio texto dele.
+          if grep -rInE 'secrets\.AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)|AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)[[:space:]]*:' .github/ ; then
+            echo "::error::credencial estática encontrada — o acesso à AWS é por OIDC"
+            exit 1
+          fi
+
+      - name: Nenhum CPF em código de produção
+        run: |
+          # O risco real é CPF virar DADO em código de produção: literal
+          # hardcoded, valor default, formato de log. A massa sintética vive nas
+          # specs, e é lá que ela está documentada.
+          #
+          # COMENTÁRIOS ficam de fora do guard de propósito. O `cpf.vo.ts`
+          # documenta exatamente quais entradas seriam aceitas por engano pelo
+          # validador do repositório-base — é a justificativa de existir da regra
+          # de formato. Apagar esse exemplo para satisfazer um grep seria deixar
+          # a ferramenta piorar o código.
+          if grep -rInE '[^0-9][0-9]{11}[^0-9]' src --include='*.ts' \
+               | grep -v '\.spec\.ts:' \
+               | grep -vE ':[[:space:]]*(//|\*|/\*)' ; then
+            echo "::error::sequencia de 11 digitos em codigo de producao"
+            exit 1
+          fi
