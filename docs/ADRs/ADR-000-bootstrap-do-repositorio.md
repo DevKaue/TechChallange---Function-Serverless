@@ -49,7 +49,9 @@ queria ter: o `git push` direto na `main` volta a passar.
 * **Contras**:
   * [❌] Não é uma decisão que se toma, é uma pessoa que se arruma. Depender de terceiro
     para mergear na véspera da entrega é risco de calendário sem contrapartida.
-  * [❌] O usuário `soat-architecture` entra com acesso de leitura e **não** aprova PR.
+  * [❌] O usuário `soat-architecture` não resolve: num repositório **público**, o GitHub
+    recusa conceder permissão de leitura a quem já lê por ser público — e um avaliador não
+    deve estar no caminho crítico de cada merge.
 
 ### Opção 3: Um único commit inicial documentado, três branches, e o gate humano no environment
 * **Descrição breve**: um commit direto — o primeiro e último —, criação de `main`,
@@ -59,7 +61,8 @@ queria ter: o `git push` direto na `main` volta a passar.
   * [✔️] O requisito do desafio é "uso obrigatório de Pull Requests", que fica integralmente
     cumprido. O desafio **não** exige aprovação.
   * [✔️] Com a lista de bypass vazia, `git push origin main` é rejeitado pelo servidor com
-    `GH006` **inclusive para o dono** — a proteção é demonstrável, não declarada.
+    `GH013: Repository rule violations found` **inclusive para o dono** — a proteção é
+    demonstrável, não declarada.
   * [✔️] O gate humano não desaparece: muda de lugar. Em GitHub Environments o autor do
     deployment **pode** aprová-lo, então a aprovação de produção funciona com um único
     colaborador. O repositório-base já usa `environment: production` no deploy.
@@ -109,8 +112,8 @@ descuido — e a diferença entre os dois, para quem avalia, é exatamente este 
 
 ### Positivas
 
-* [✔️] `git push origin main` rejeitado com `GH006` mesmo para o dono — proteção
-  demonstrável em vídeo.
+* [✔️] `git push origin main` rejeitado com `GH013: Repository rule violations found`
+  mesmo para o dono — proteção demonstrável em vídeo.
 * [✔️] `git log --first-parent main` prova que só existe um commit fora de PR.
 * [✔️] O merge nunca trava por falta de aprovador.
 * [✔️] O gate humano de produção é gravável: a tela "Review deployments" e a linha de log
@@ -133,10 +136,28 @@ descuido — e a diferença entre os dois, para quem avalia, é exatamente este 
 * [x] Commit inicial na `main`.
 * [x] Criar `develop` e `homolog`.
 * [x] Ligar os rulesets nas três branches, sem status checks.
-* [ ] Convidar `soat-architecture` e confirmar que a lista de convites pendentes fica vazia.
+* [x] Convidar `soat-architecture` e confirmar que a lista de convites pendentes fica vazia.
+      Concedido como **write**, seguindo o precedente do repositório-base das Fases 1 e 2:
+      num repositório público o GitHub recusa `pull` com
+      `Cannot assign soat-architecture permission of read`, porque o acesso de leitura já é
+      universal.
 * [ ] Desligar "Prevent self-review" no `environment: production`.
 * [ ] Acrescentar `homolog` aos gatilhos do CI **antes** de ligar os status checks obrigatórios.
 * [ ] Ligar cada status check só depois de vê-lo verde uma vez.
+
+---
+
+## Nota sobre o código de rejeição
+
+O push direto é recusado com **`GH013: Repository rule violations found`**, e **não** com
+`GH006: Protected branch update failed`. Os dois existem e significam coisas diferentes:
+`GH006` vem da *branch protection* clássica, `GH013` vem de *rulesets* — que é o mecanismo
+usado aqui, porque permite aplicar a mesma regra a várias branches e restringir o método de
+merge por conjunto.
+
+Isso importa além da curiosidade: o critério de aceite da proteção de branch manda conferir
+a mensagem exata, e um teste que espera `GH006` falharia contra uma proteção que está
+funcionando perfeitamente.
 
 ---
 
