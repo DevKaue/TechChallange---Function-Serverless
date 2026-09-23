@@ -27,7 +27,7 @@ export interface CustomerAccessTokenPayload {
 export interface SignedToken {
   accessToken: string;
   /** Sempre 3600. Número, nunca a string '1h' — ver o contrato congelado. */
-  expiresIn: number;
+  expiresIn: 3600;
 }
 
 export interface TokenService {
