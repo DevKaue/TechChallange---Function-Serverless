@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://techchallenge.dev/contracts/customer-access-token.schema.json",
+  "title": "Payload do JWT de cliente",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sub", "type", "iss", "jti", "iat", "exp"],
+  "properties": {
+    "sub": { "type": "string", "format": "uuid" },
+    "type": { "const": "customer" },
+    "iss": { "const": "techchallenge-auth-lambda" },
+    "jti": { "type": "string", "format": "uuid" },
+    "iat": { "type": "integer", "minimum": 0 },
+    "exp": { "type": "integer", "minimum": 1 }
+  }
+}

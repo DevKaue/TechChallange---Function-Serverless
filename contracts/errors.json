@@ -1,0 +1,32 @@
+{
+  "invalid_cpf": {
+    "httpStatus": 400,
+    "error": "invalid_request",
+    "publicMessage": "CPF inválido"
+  },
+  "customer_not_found": {
+    "httpStatus": 401,
+    "error": "unauthorized",
+    "publicMessage": "CPF não autorizado"
+  },
+  "customer_archived": {
+    "httpStatus": 401,
+    "error": "unauthorized",
+    "publicMessage": "CPF não autorizado"
+  },
+  "customer_inactive": {
+    "httpStatus": 401,
+    "error": "unauthorized",
+    "publicMessage": "CPF não autorizado"
+  },
+  "customer_blocked": {
+    "httpStatus": 401,
+    "error": "unauthorized",
+    "publicMessage": "CPF não autorizado"
+  },
+  "data_source_unavailable": {
+    "httpStatus": 503,
+    "error": "service_unavailable",
+    "publicMessage": "Serviço temporariamente indisponível"
+  }
+}
