@@ -1,0 +1,11 @@
+flowchart LR
+  C[Cliente] -->|POST /auth cpf| GW[API Gateway HTTP API]
+  GW --> AUTH[Lambda de autenticação<br/>handler.handler]
+  AUTH -->|SELECT id, status, deleted_at| RDS[(RDS PostgreSQL)]
+  AUTH -.->|paths| SSM[SSM Parameter Store]
+  AUTH -->|JWT HS256 1h| C
+  C -->|Bearer JWT| GW
+  GW --> AZ[Lambda Authorizer<br/>authorizer.handler.handler]
+  AZ -.->|segredo JWT| SSM
+  AZ -->|isAuthorized + customerId| GW
+  GW --> APP[Aplicação principal no EKS]

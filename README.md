@@ -14,15 +14,25 @@ Authorizer** que protege as rotas sensíveis na borda do API Gateway.
 | [tech-challenge-database-infra](https://github.com/DevKaue/tech-challenge-database-infra) | Banco de dados gerenciado (Terraform) |
 | _(a definir)_ | Infraestrutura Kubernetes (Terraform) |
 
-> **Status: bootstrap.** Este repositório acabou de ser criado. As seções abaixo existem
-> porque são entregáveis obrigatórios do desafio e vão ser preenchidas nos marcos M2 e M5
-> do plano de execução. O que já vale: o fluxo de contribuição em
-> [CONTRIBUTING.md](CONTRIBUTING.md) e a decisão de bootstrap em
-> [ADR-000](docs/ADRs/ADR-000-bootstrap-do-repositorio.md).
+> **Status: código da função e do Authorizer completo, deploy pendente.** Domínio, caso de
+> uso, adaptador HTTP, composição no cold start e Lambda Authorizer estão implementados e
+> testados (unitário, integração com Postgres real e smoke E2E). Faltam o Dockerfile, o
+> Terraform da função e do API Gateway e o workflow de deploy. Seções com comentário `M2`/`M5`
+> ainda serão preenchidas.
 
 ## Propósito
 
-<!-- M2 -->
+Duas funções na mesma imagem:
+
+| Função | Entrada | Handler | O que faz |
+|---|---|---|---|
+| Autenticação | `POST /auth` com `{"cpf": "..."}` | `handler.handler` | Valida o CPF (formato e dígitos verificadores) antes de qualquer I/O, consulta existência e status do cliente no Postgres gerenciado e devolve um JWT HS256 de 1 h |
+| Lambda Authorizer | Header `Authorization: Bearer <jwt>` nas rotas protegidas | `authorizer.handler.handler` | Valida assinatura HS256, emissor `techchallenge-auth-lambda`, `type = customer`, expiração e `sub` UUID; libera a rota com `customerId` no contexto |
+
+As duas montam as dependências na **primeira requisição** do container, lendo segredos e
+o contrato de descoberta do banco pelo SSM, e reaproveitam nas seguintes. Falha nessa
+montagem vira **503 no contrato** (autenticação) ou **negação** (Authorizer), nunca 502 —
+ver [ADR-001](docs/ADRs/ADR-001-composicao-no-primeiro-request-e-authorizer-sem-banco.md).
 
 ## Tecnologias utilizadas
 
@@ -38,13 +48,60 @@ Authorizer** que protege as rotas sensíveis na borda do API Gateway.
 
 ## Passos para execução e deploy
 
-<!-- M2 / M3 — inclui o ambiente local com Runtime Interface Emulator e o deploy por
-     alias, com rollback para a versão anterior -->
+### Testes locais
+
+```bash
+nvm use                      # Node 22
+npm ci
+npm run typecheck && npm run lint
+npm test                     # unitários + contratos, com cobertura mínima global
+
+npm run db:it:up             # Postgres 15.19 em Docker, porta 5432
+npm run test:integration     # repositório e fluxo completo contra o banco real
+npm run db:it:down
+```
+
+### Variáveis de ambiente da função
+
+| Variável | Autenticação | Authorizer | Exemplo |
+|---|---|---|---|
+| `APP_ENV` | obrigatória | obrigatória | `homolog` |
+| `JWT_SECRET_SSM_PATH` | obrigatória | obrigatória | `/techchallenge/homolog/auth/jwt-secret` |
+| `DB_SSM_PREFIX` | obrigatória | — | `/techchallenge/homolog/db` |
+| `RDS_CA_BUNDLE_PATH` | opcional | — | padrão `/var/task/certs/global-bundle.pem` |
+
+Só **paths** do SSM entram como variável, nunca valores. Os parâmetros do banco
+(`host`, `port`, `name`, `username`, `password`) são publicados pelo repositório
+[tech-challenge-database-infra](https://github.com/DevKaue/tech-challenge-database-infra).
+
+### Smoke pós-deploy
+
+```bash
+API_URL=https://<api>.execute-api.us-east-1.amazonaws.com \
+CPF_ATIVO=<cpf sintético do seed de homologação> \
+PROTECTED_URL=https://<api>/<rota protegida> \
+test/e2e/smoke-auth.sh
+```
+
+<!-- M5 — Dockerfile, Runtime Interface Emulator e deploy por alias com rollback -->
 
 ## Diagrama da arquitetura deste repositório
 
-<!-- M2 — bloco ```mermaid INLINE. O GitHub não renderiza .mmd linkado, e quem avalia não
-     clona o repositório para ver desenho. A fonte fica em docs/diagrams/ -->
+```mermaid
+flowchart LR
+  C[Cliente] -->|POST /auth cpf| GW[API Gateway HTTP API]
+  GW --> AUTH[Lambda de autenticação<br/>handler.handler]
+  AUTH -->|SELECT id, status, deleted_at| RDS[(RDS PostgreSQL)]
+  AUTH -.->|paths| SSM[SSM Parameter Store]
+  AUTH -->|JWT HS256 1h| C
+  C -->|Bearer JWT| GW
+  GW --> AZ[Lambda Authorizer<br/>authorizer.handler.handler]
+  AZ -.->|segredo JWT| SSM
+  AZ -->|isAuthorized + customerId| GW
+  GW --> APP[Aplicação principal no EKS]
+```
+
+Fonte em [`docs/diagrams/01-autenticacao.mmd`](docs/diagrams/01-autenticacao.mmd).
 
 ## Contrato da API
 
@@ -63,13 +120,35 @@ O 401 é deliberadamente indistinguível entre "não existe" e "não elegível":
 permitiria enumeração de CPF a partir de listas vazadas. O motivo real fica no log
 estruturado, correlacionado pelo `correlationId` devolvido no corpo.
 
+Contratos versionados em [`contracts/`](contracts): resposta pública, payload do JWT e
+tabela de erros, validados em teste contra o token **real** emitido pelo assinador.
+
+### Lambda Authorizer (HTTP API, payload 2.0, resposta simples)
+
+| Situação | Resposta | Motivo no log (`authz.denied`) |
+|---|---|---|
+| Token válido | `isAuthorized: true`, contexto `customerId` e `principalType` | `authz.allowed` |
+| Sem header ou fora do formato `Bearer <jwt>` | negado | `missing_token`, `malformed_header` |
+| Expirado, ainda não válido | negado | `expired`, `not_yet_valid` |
+| Outro segredo, `alg: none`, HS512 | negado | `invalid_signature_or_alg` |
+| JWT administrativo da aplicação (sem `iss`) ou `type` diferente | negado | `wrong_issuer`, `wrong_type` |
+| Segredo não carregado do SSM | negado (fail closed) | `bootstrap.error` |
+
+O token nunca é registrado em log, em nenhuma forma.
+
 ## Custo estimado
 
 <!-- M2 — tabela em US$/dia -->
 
 ## Dívidas conscientes
 
-<!-- M2 — cada dívida com o critério que a tornaria inaceitável -->
+| Dívida | Por que foi aceita | Quando deixa de ser aceitável |
+|---|---|---|
+| O Authorizer não consulta o status do cliente | Uma consulta por requisição protegida multiplicaria conexões no RDS pelo tráfego da aplicação inteira | Quando bloquear um cliente precisar valer em menos de 1 h (o `exp` do token) |
+| Segredo HS256 compartilhado com a aplicação principal | Mesmo algoritmo e segredo que a aplicação já valida, sem mudança do lado de lá | Quando um terceiro precisar validar tokens: aí o caminho é RS256 com JWKS |
+| Sem RDS Proxy | `max: 1` por container e tráfego acadêmico; o alarme de conexões do repositório de banco é o gatilho | Quando o alarme `rds-conexoes` disparar |
+
+<!-- M2 — completar com as dívidas de empacotamento e deploy -->
 
 ## Documentação
 

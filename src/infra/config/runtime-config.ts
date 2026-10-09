@@ -33,3 +33,20 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     ),
   };
 }
+
+export interface AuthorizerConfig {
+  appEnv: string;
+  jwtSecretSsmPath: string;
+}
+
+/**
+ * O Authorizer só valida assinatura: não conhece banco, então não exige
+ * DB_SSM_PREFIX. Reaproveitar `loadRuntimeConfig` obrigaria a função a receber
+ * uma variável que não usa — e uma permissão de IAM no path do banco junto.
+ */
+export function loadAuthorizerConfig(env: NodeJS.ProcessEnv = process.env): AuthorizerConfig {
+  return {
+    appEnv: required(env, 'APP_ENV'),
+    jwtSecretSsmPath: ssmPath(required(env, 'JWT_SECRET_SSM_PATH'), 'JWT_SECRET_SSM_PATH'),
+  };
+}
