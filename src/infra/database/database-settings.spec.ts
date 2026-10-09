@@ -5,7 +5,7 @@ import {
   type DatabaseSettings,
 } from './database-settings';
 
-const PREFIX = '/techchallenge/homolog/db';
+const PREFIX = '/techchallenge/staging/db';
 const CA = '-----BEGIN CERTIFICATE-----\nMIIsintetico\n-----END CERTIFICATE-----\n';
 
 class SecretsStub implements SecretProvider {

@@ -4,7 +4,7 @@ describe('ConsoleJsonLogger', () => {
   it('emite uma linha JSON estruturada com contexto de runtime', () => {
     const write = jest.spyOn(console, 'log').mockImplementation();
     process.env.AWS_LAMBDA_FUNCTION_VERSION = '7';
-    process.env.APP_ENV = 'homolog';
+    process.env.APP_ENV = 'staging';
     const logger = new ConsoleJsonLogger();
 
     logger.write('warn', {
@@ -25,7 +25,7 @@ describe('ConsoleJsonLogger', () => {
       event: 'auth.denied',
       correlationId: 'correlation-1',
       functionVersion: '7',
-      env: 'homolog',
+      env: 'staging',
     });
     expect(line.timestamp).toEqual(expect.any(String));
 

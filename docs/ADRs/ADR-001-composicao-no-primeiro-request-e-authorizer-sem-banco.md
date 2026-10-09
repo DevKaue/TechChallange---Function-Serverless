@@ -1,6 +1,6 @@
 # ADR 001: Composição no primeiro request e Lambda Authorizer sem consulta ao banco
 
-* **Status**: Aceito
+* **Status**: Aceito. A parte do Lambda Authorizer foi substituída pelo [ADR-002](ADR-002-kong-invoca-a-funcao-sem-api-gateway.md)
 * **Data**: 2026-09-27
 * **Hora**: 22:30
 * **Autor**: Kaue Sabino

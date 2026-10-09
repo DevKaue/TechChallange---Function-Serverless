@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# Smoke pós-deploy da autenticação por CPF, contra o API Gateway REAL.
+# Smoke pós-deploy da autenticação por CPF, contra o Kong REAL (NLB do gateway).
 #
 # Roda no job de deploy, depois de publicar o alias, e decide se o deploy fica
 # ou se o alias volta para a versão anterior. Só usa curl e jq, que já existem
 # no runner do GitHub — nada de npm install para um teste de 30 segundos.
 #
 # Uso:
-#   API_URL=https://xxxx.execute-api.us-east-1.amazonaws.com \
+#   API_URL=http://<nlb-do-kong>.elb.us-east-1.amazonaws.com \
 #   CPF_ATIVO=11144477735 \
-#   [PROTECTED_URL=https://.../service-orders] \
+#   [PROTECTED_URL=http://<nlb-do-kong>/api/<rota de cliente>] \
 #   test/e2e/smoke-auth.sh
 #
 # CPF_ATIVO precisa existir, ACTIVE e não arquivado, no banco do ambiente
 # (seed de homologação). A massa é sintética — ver cpf.vo.spec.ts.
+#
+# São 4 chamadas ao /auth: cabem no rate limit de 10/min por IP do Kong. Rodar o
+# smoke em loop, do mesmo runner, começa a devolver 429 e não é falha da função.
 
 set -euo pipefail
 
@@ -55,7 +58,7 @@ if [ "$status" = 200 ]; then
 
   token=$(jq -r '.access_token' /tmp/smoke-body.json)
   # Payload do JWT (base64url, sem verificar assinatura — isso é papel do
-  # Authorizer e do teste unitário). Confere só que não vazou dado pessoal.
+  # plugin jwt do Kong e do teste unitário). Confere só que não vazou dado pessoal.
   # base64url vem sem padding, e o `base64 -d` do GNU recusa entrada sem ele.
   seg=$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+')
   while [ $(( ${#seg} % 4 )) -ne 0 ]; do seg="${seg}="; done

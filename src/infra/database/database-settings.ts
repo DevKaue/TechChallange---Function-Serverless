@@ -58,7 +58,7 @@ function parsePort(raw: string, prefix: string): number {
  *   alarme de conexões do repositório de banco que avisa se isso mudar.
  * - `statement_timeout` abaixo do timeout da função: a query cancela no banco e
  *   o handler ainda devolve 503 no contrato, em vez de a Lambda morrer por
- *   timeout e o API Gateway responder 503 genérico sem correlationId.
+ *   timeout e o gateway responder erro genérico sem correlationId.
  */
 export function buildPoolConfig(settings: DatabaseSettings, caBundle: string): PoolConfig {
   if (!caBundle.includes('BEGIN CERTIFICATE')) {

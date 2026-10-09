@@ -103,7 +103,7 @@ describe('authBootstrapFailure', () => {
   it('devolve 503 no contrato, com correlationId, e loga só o nome do erro', () => {
     const logger = new LoggerSpy();
     const failure = Object.assign(
-      new Error('Parameter /techchallenge/homolog/db/password not found'),
+      new Error('Parameter /techchallenge/staging/db/password not found'),
       { name: 'ParameterNotFound' },
     );
 

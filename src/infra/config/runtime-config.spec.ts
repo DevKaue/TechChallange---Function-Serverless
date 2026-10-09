@@ -1,17 +1,17 @@
 import { loadRuntimeConfig } from './runtime-config';
 
 const VALID_ENV = {
-  APP_ENV: 'homolog',
-  DB_SSM_PREFIX: '/techchallenge/homolog/db',
-  JWT_SECRET_SSM_PATH: '/techchallenge/homolog/auth/jwt-secret',
+  APP_ENV: 'staging',
+  DB_SSM_PREFIX: '/techchallenge/staging/db',
+  JWT_SECRET_SSM_PATH: '/techchallenge/staging/auth/jwt-secret',
 };
 
 describe('loadRuntimeConfig', () => {
   it('carrega apenas paths e metadados não secretos', () => {
     expect(loadRuntimeConfig(VALID_ENV)).toEqual({
-      appEnv: 'homolog',
-      dbSsmPrefix: '/techchallenge/homolog/db',
-      jwtSecretSsmPath: '/techchallenge/homolog/auth/jwt-secret',
+      appEnv: 'staging',
+      dbSsmPrefix: '/techchallenge/staging/db',
+      jwtSecretSsmPath: '/techchallenge/staging/auth/jwt-secret',
     });
   });
 
@@ -25,9 +25,9 @@ describe('loadRuntimeConfig', () => {
   );
 
   it.each([
-    ['DB_SSM_PREFIX', 'techchallenge/homolog/db'],
-    ['DB_SSM_PREFIX', '/techchallenge//homolog/db'],
-    ['JWT_SECRET_SSM_PATH', '/techchallenge/homolog/auth/'],
+    ['DB_SSM_PREFIX', 'techchallenge/staging/db'],
+    ['DB_SSM_PREFIX', '/techchallenge//staging/db'],
+    ['JWT_SECRET_SSM_PATH', '/techchallenge/staging/auth/'],
   ])('recusa path SSM não normalizado em %s', (name, value) => {
     expect(() => loadRuntimeConfig({ ...VALID_ENV, [name]: value })).toThrow(
       `${name} precisa ser um path SSM absoluto e normalizado.`,

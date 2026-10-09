@@ -76,12 +76,12 @@ function body(result: { body?: string | undefined }): Record<string, unknown> {
 }
 
 /**
- * Fluxo inteiro SEM MOCK de regra: evento do API Gateway → handler → caso de uso
+ * Fluxo inteiro SEM MOCK de regra: evento do gateway → handler → caso de uso
  * → repositório `pg` → Postgres real → `jsonwebtoken`. Só o console é espionado,
  * para provar a regra "CPF nunca vai para log" na saída que o CloudWatch
  * realmente recebe — e não num LoggerSpy.
  */
-describe('Fluxo de autenticação ponta a ponta (sem API Gateway)', () => {
+describe('Fluxo de autenticação ponta a ponta (sem gateway)', () => {
   let db: IsolatedSchema;
   let handler: ReturnType<typeof createAuthHttpHandler>;
   let stdout: jest.SpyInstance;

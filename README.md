@@ -2,8 +2,9 @@
 
 Function Serverless (AWS Lambda) que autentica o **cliente da oficina pelo CPF**: valida o
 documento, consulta a existência e o status do cliente na base gerenciada e devolve um
-**JWT** válido para consumo das APIs protegidas. O mesmo repositório entrega o **Lambda
-Authorizer** que protege as rotas sensíveis na borda do API Gateway.
+**JWT** válido para consumo das APIs protegidas. Quem chama a função é o **Kong**, o API
+Gateway do projeto ([ADR-002](docs/ADRs/ADR-002-kong-invoca-a-funcao-sem-api-gateway.md)),
+que também valida os tokens nas rotas protegidas com o plugin `jwt`.
 
 É um dos quatro repositórios da Fase 3:
 
@@ -12,27 +13,36 @@ Authorizer** que protege as rotas sensíveis na borda do API Gateway.
 | [TechChallange](https://github.com/DevKaue/TechChallange) | Aplicação principal em Kubernetes (Fases 1 e 2) |
 | **TechChallange---Function-Serverless** (este) | **Function Serverless de autenticação por CPF** |
 | [tech-challenge-database-infra](https://github.com/DevKaue/tech-challenge-database-infra) | Banco de dados gerenciado (Terraform) |
-| _(a definir)_ | Infraestrutura Kubernetes (Terraform) |
+| [tech-challenge-app-](https://github.com/DevKaue/tech-challenge-app-) | Aplicação da Fase 3, com as rotas do Kong (ADR-005, RFC-001) |
+| [TechChallenge---Infraestrutura-Kubernetes-com-Terraform](https://github.com/DevKaue/TechChallenge---Infraestrutura-Kubernetes-com-Terraform) | EKS, Kong e o segredo JWT no SSM |
 
-> **Status: código da função e do Authorizer completo, deploy pendente.** Domínio, caso de
-> uso, adaptador HTTP, composição no cold start e Lambda Authorizer estão implementados e
-> testados (unitário, integração com Postgres real e smoke E2E). Faltam o Dockerfile, o
-> Terraform da função e do API Gateway e o workflow de deploy. Seções com comentário `M2`/`M5`
-> ainda serão preenchidas.
+> **Status: código da função completo, deploy pendente.** Domínio, caso de uso, adaptador
+> HTTP (eventos v1.0 do Kong e v2.0), composição no cold start estão implementados e
+> testados (unitário, integração com Postgres real e smoke E2E). Faltam a imagem, o
+> Terraform da função e o workflow de deploy. Seções com comentário `M2`/`M5` ainda serão
+> preenchidas.
 
 ## Propósito
 
-Duas funções na mesma imagem:
-
 | Função | Entrada | Handler | O que faz |
 |---|---|---|---|
-| Autenticação | `POST /auth` com `{"cpf": "..."}` | `handler.handler` | Valida o CPF (formato e dígitos verificadores) antes de qualquer I/O, consulta existência e status do cliente no Postgres gerenciado e devolve um JWT HS256 de 1 h |
-| Lambda Authorizer | Header `Authorization: Bearer <jwt>` nas rotas protegidas | `authorizer.handler.handler` | Valida assinatura HS256, emissor `techchallenge-auth-lambda`, `type = customer`, expiração e `sub` UUID; libera a rota com `customerId` no contexto |
+| `techchallenge-auth-<env>` | `POST /auth` com `{"cpf": "..."}`, invocada pelo plugin `aws-lambda` do Kong | `handler.handler` | Valida o CPF (formato e dígitos verificadores) antes de qualquer I/O, consulta existência e status do cliente no Postgres gerenciado e devolve um JWT HS256 de 1 h |
 
-As duas montam as dependências na **primeira requisição** do container, lendo segredos e
-o contrato de descoberta do banco pelo SSM, e reaproveitam nas seguintes. Falha nessa
-montagem vira **503 no contrato** (autenticação) ou **negação** (Authorizer), nunca 502 —
-ver [ADR-001](docs/ADRs/ADR-001-composicao-no-primeiro-request-e-authorizer-sem-banco.md).
+`<env>` é `staging` para a `develop` e `prod` para a `main`: é o único nome que o Kong tem
+permissão de invocar.
+
+A função monta as dependências na **primeira requisição** do container, lendo segredos e o
+contrato de descoberta do banco pelo SSM, e reaproveita nas seguintes. Falha nessa montagem
+vira **503 no contrato**, nunca 502. Ver
+[ADR-001](docs/ADRs/ADR-001-composicao-no-primeiro-request-e-authorizer-sem-banco.md).
+
+### Formato do evento
+
+O Kong envia o evento no formato REST (v1.0), com `awsgateway_compatible: true` e o body em
+base64. O handler também aceita o v2.0 do HTTP API, usado no teste local. A resposta é a
+mesma nos dois: `{statusCode, headers, body}`, que o Kong repassa com
+`is_proxy_integration: true`. O `X-Correlation-ID` gerado pelo plugin `correlation-id` do
+Kong (`<uuid>#<n>`) é propagado para o log e para a resposta.
 
 ## Tecnologias utilizadas
 
@@ -43,7 +53,7 @@ ver [ADR-001](docs/ADRs/ADR-001-composicao-no-primeiro-request-e-authorizer-sem-
 | Banco | `pg` (driver direto), sem ORM | O schema pertence a outro repositório; um `schema.prisma` copiado seria uma segunda fonte de verdade que compila mesmo divergente |
 | Token | `jsonwebtoken`, HS256 | Mesmo segredo e mesmo algoritmo da aplicação principal |
 | Testes | Jest + Postgres em service container | Mesma estratégia do repositório-base |
-| IaC | Terraform `~> 1.10` | Função, alias, role de execução e observabilidade |
+| IaC | Terraform `~> 1.10` | Função, alias e observabilidade. A role de execução é a **LabRole** existente: o AWS Academy não permite criar roles |
 | CI/CD | GitHub Actions com OIDC | Sem chave estática em secret de repositório |
 
 ## Passos para execução e deploy
@@ -63,23 +73,24 @@ npm run db:it:down
 
 ### Variáveis de ambiente da função
 
-| Variável | Autenticação | Authorizer | Exemplo |
-|---|---|---|---|
-| `APP_ENV` | obrigatória | obrigatória | `homolog` |
-| `JWT_SECRET_SSM_PATH` | obrigatória | obrigatória | `/techchallenge/homolog/auth/jwt-secret` |
-| `DB_SSM_PREFIX` | obrigatória | — | `/techchallenge/homolog/db` |
-| `RDS_CA_BUNDLE_PATH` | opcional | — | padrão `/var/task/certs/global-bundle.pem` |
+| Variável | Obrigatória | Exemplo |
+|---|---|---|
+| `APP_ENV` | sim | `staging` |
+| `JWT_SECRET_SSM_PATH` | sim | `/techchallenge/staging/auth/jwt-secret` |
+| `DB_SSM_PREFIX` | sim | `/techchallenge/staging/db` |
+| `RDS_CA_BUNDLE_PATH` | não | padrão `/var/task/certs/global-bundle.pem` |
 
-Só **paths** do SSM entram como variável, nunca valores. Os parâmetros do banco
-(`host`, `port`, `name`, `username`, `password`) são publicados pelo repositório
-[tech-challenge-database-infra](https://github.com/DevKaue/tech-challenge-database-infra).
+Só **paths** do SSM entram como variável, nunca valores. O segredo JWT é criado pelo
+repositório de infraestrutura Kubernetes, e é o mesmo que o Kong e a aplicação usam. Os
+parâmetros do banco (`host`, `port`, `name`, `username`, `password`) são publicados pelo
+repositório [tech-challenge-database-infra](https://github.com/DevKaue/tech-challenge-database-infra).
 
 ### Smoke pós-deploy
 
 ```bash
-API_URL=https://<api>.execute-api.us-east-1.amazonaws.com \
+API_URL=http://<nlb-do-kong> \
 CPF_ATIVO=<cpf sintético do seed de homologação> \
-PROTECTED_URL=https://<api>/<rota protegida> \
+PROTECTED_URL=http://<nlb-do-kong>/api/<rota de cliente> \
 test/e2e/smoke-auth.sh
 ```
 
@@ -89,16 +100,15 @@ test/e2e/smoke-auth.sh
 
 ```mermaid
 flowchart LR
-  C[Cliente] -->|POST /auth cpf| GW[API Gateway HTTP API]
-  GW --> AUTH[Lambda de autenticação<br/>handler.handler]
+  C[Cliente] -->|POST /auth cpf| KONG[Kong no EKS<br/>plugin aws-lambda]
+  KONG -->|evento v1.0, LabRole do nó| AUTH[Lambda techchallenge-auth-env<br/>handler.handler]
   AUTH -->|SELECT id, status, deleted_at| RDS[(RDS PostgreSQL)]
   AUTH -.->|paths| SSM[SSM Parameter Store]
-  AUTH -->|JWT HS256 1h| C
-  C -->|Bearer JWT| GW
-  GW --> AZ[Lambda Authorizer<br/>authorizer.handler.handler]
-  AZ -.->|segredo JWT| SSM
-  AZ -->|isAuthorized + customerId| GW
-  GW --> APP[Aplicação principal no EKS]
+  AUTH -->|JWT HS256 1h| KONG
+  KONG --> C
+  C -->|Bearer JWT| KONGJ[Kong<br/>plugin jwt, consumer por iss]
+  SSM -.->|mesmo segredo, via Secret do deploy do app| KONGJ
+  KONGJ --> APP[Aplicação principal no EKS<br/>revalida o token]
 ```
 
 Fonte em [`docs/diagrams/01-autenticacao.mmd`](docs/diagrams/01-autenticacao.mmd).
@@ -123,16 +133,13 @@ estruturado, correlacionado pelo `correlationId` devolvido no corpo.
 Contratos versionados em [`contracts/`](contracts): resposta pública, payload do JWT e
 tabela de erros, validados em teste contra o token **real** emitido pelo assinador.
 
-### Lambda Authorizer (HTTP API, payload 2.0, resposta simples)
+### Rotas protegidas
 
-| Situação | Resposta | Motivo no log (`authz.denied`) |
-|---|---|---|
-| Token válido | `isAuthorized: true`, contexto `customerId` e `principalType` | `authz.allowed` |
-| Sem header ou fora do formato `Bearer <jwt>` | negado | `missing_token`, `malformed_header` |
-| Expirado, ainda não válido | negado | `expired`, `not_yet_valid` |
-| Outro segredo, `alg: none`, HS512 | negado | `invalid_signature_or_alg` |
-| JWT administrativo da aplicação (sem `iss`) ou `type` diferente | negado | `wrong_issuer`, `wrong_type` |
-| Segredo não carregado do SSM | negado (fail closed) | `bootstrap.error` |
+Quem valida o token nas rotas protegidas é o plugin `jwt` do Kong, que escolhe o consumer
+pela claim `iss` (`techchallenge-auth-lambda` para cliente) e confere `exp`. A aplicação
+valida de novo. O contrato do token emitido aqui está em
+[`contracts/customer-access-token.schema.json`](contracts/customer-access-token.schema.json):
+HS256, `iss: techchallenge-auth-lambda`, `type: customer`, `sub` com o id do cliente.
 
 O token nunca é registrado em log, em nenhuma forma.
 
@@ -144,7 +151,8 @@ O token nunca é registrado em log, em nenhuma forma.
 
 | Dívida | Por que foi aceita | Quando deixa de ser aceitável |
 |---|---|---|
-| O Authorizer não consulta o status do cliente | Uma consulta por requisição protegida multiplicaria conexões no RDS pelo tráfego da aplicação inteira | Quando bloquear um cliente precisar valer em menos de 1 h (o `exp` do token) |
+| O gateway não consulta o status do cliente | O plugin `jwt` do Kong valida só o token; consultar o banco a cada requisição protegida multiplicaria conexões no RDS | Quando bloquear um cliente precisar valer em menos de 1 h (o `exp` do token) |
+| Kong invoca a função com a LabRole do nó | O AWS Academy não permite criar roles, então não há IRSA | Fora do Academy: qualquer pod do nó poderia invocar a função |
 | Segredo HS256 compartilhado com a aplicação principal | Mesmo algoritmo e segredo que a aplicação já valida, sem mudança do lado de lá | Quando um terceiro precisar validar tokens: aí o caminho é RS256 com JWKS |
 | Sem RDS Proxy | `max: 1` por container e tráfego acadêmico; o alarme de conexões do repositório de banco é o gatilho | Quando o alarme `rds-conexoes` disparar |
 

@@ -6,14 +6,14 @@ import type { AuthLogEntry, Logger } from '../logging/logger';
 import type { SqlClient } from '../repositories/pg-customer.repository';
 import { composeAuthHandler } from './auth-composition';
 
-const JWT_PATH = '/techchallenge/homolog/auth/jwt-secret';
-const DB_PREFIX = '/techchallenge/homolog/db';
-const SECRET = 'homolog-jwt-secret-with-32-chars-or-more';
+const JWT_PATH = '/techchallenge/staging/auth/jwt-secret';
+const DB_PREFIX = '/techchallenge/staging/db';
+const SECRET = 'staging-jwt-secret-with-32-chars-or-more';
 const CA = '-----BEGIN CERTIFICATE-----\nMIIsintetico\n-----END CERTIFICATE-----\n';
 const CUSTOMER_ID = '3f2a1c8e-0d4b-4f6a-9c1e-2b7d8a5f4e30';
 
 const ENV = {
-  APP_ENV: 'homolog',
+  APP_ENV: 'staging',
   DB_SSM_PREFIX: DB_PREFIX,
   JWT_SECRET_SSM_PATH: JWT_PATH,
 };
@@ -137,7 +137,7 @@ describe('composeAuthHandler', () => {
 
   it('variável ausente falha ANTES de qualquer chamada ao SSM', async () => {
     const secrets = new SecretsStub();
-    const env: NodeJS.ProcessEnv = { APP_ENV: 'homolog', JWT_SECRET_SSM_PATH: JWT_PATH };
+    const env: NodeJS.ProcessEnv = { APP_ENV: 'staging', JWT_SECRET_SSM_PATH: JWT_PATH };
 
     await expect(composeAuthHandler(ports({ env, secrets }).value)).rejects.toThrow(
       'Variável obrigatória ausente: DB_SSM_PREFIX',
