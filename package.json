@@ -12,7 +12,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.build.json",
     "lint": "eslint \"src/**/*.ts\" --max-warnings=0",
     "test": "jest",
-    "test:ci": "jest --coverage --runInBand"
+    "test:ci": "jest --coverage --runInBand",
+    "test:integration": "jest -c jest.integration.config.js --runInBand",
+    "db:it:up": "docker run -d --rm --name techchallenge-pg-it -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:15.19-alpine",
+    "db:it:down": "docker stop techchallenge-pg-it"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

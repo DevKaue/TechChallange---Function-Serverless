@@ -1,4 +1,4 @@
-import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import type { APIGatewayProxyEvent, APIGatewayProxyEventV2 } from 'aws-lambda';
 import type {
   AuthenticateCustomerInput,
   AuthenticateCustomerOutput,
@@ -224,5 +224,125 @@ describe('createAuthHttpHandler', () => {
 
     const attempts = logger.entries.filter(({ entry }) => entry.event === 'auth.attempt');
     expect(attempts.map(({ entry }) => entry.coldStart)).toEqual([true, false]);
+  });
+});
+
+/**
+ * Evento como o plugin `aws-lambda` do Kong monta com `awsgateway_compatible:
+ * true`: formato REST (v1.0), sem `version`, body em base64 por padrão
+ * (`base64_encode_body`) e o X-Correlation-ID já preenchido pelo plugin
+ * `correlation-id`, que roda antes.
+ */
+function kongEvent(
+  body: string | null,
+  options: { headers?: Record<string, string>; base64?: boolean } = {},
+): APIGatewayProxyEvent {
+  const base64 = options.base64 ?? true;
+  return {
+    resource: '/auth',
+    path: '/auth',
+    httpMethod: 'POST',
+    headers: options.headers ?? { 'content-type': 'application/json' },
+    multiValueHeaders: {},
+    queryStringParameters: null,
+    multiValueQueryStringParameters: null,
+    pathParameters: null,
+    stageVariables: null,
+    body: body !== null && base64 ? Buffer.from(body).toString('base64') : body,
+    isBase64Encoded: body !== null && base64,
+    requestContext: {
+      requestId: 'kong-request-id',
+      httpMethod: 'POST',
+      path: '/auth',
+      protocol: 'HTTP/1.1',
+      resourcePath: '/auth',
+      domainName: 'kong.interno',
+      requestTimeEpoch: 1_790_163_200_000,
+      identity: { sourceIp: '10.0.0.10', userAgent: 'curl' },
+    },
+  } as unknown as APIGatewayProxyEvent;
+}
+
+describe('createAuthHttpHandler com o evento v1.0 do Kong', () => {
+  let useCase: UseCaseStub;
+  let logger: LoggerSpy;
+
+  beforeEach(() => {
+    useCase = new UseCaseStub();
+    logger = new LoggerSpy();
+  });
+
+  it('decodifica o body base64 e devolve 200 com o mesmo formato de resposta', async () => {
+    const handler = createAuthHttpHandler(useCase, logger);
+
+    const result = await handler(
+      kongEvent(JSON.stringify({ cpf: '111.444.777-35' }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    expect(useCase.inputs).toEqual([{ cpf: '111.444.777-35' }]);
+    expect(result).toEqual({
+      statusCode: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'x-correlation-id': 'kong-request-id',
+      },
+      body: JSON.stringify(useCase.result),
+    });
+  });
+
+  it('propaga o X-Correlation-ID no formato uuid#counter do plugin do Kong', async () => {
+    const handler = createAuthHttpHandler(useCase, logger);
+    const kongId = '0f6c3d2e-6a1b-4c39-9a4e-0d7f5b2c8e11#12';
+
+    const result = await handler(
+      kongEvent(JSON.stringify({ cpf: '11144477735' }), {
+        headers: { 'X-Correlation-ID': kongId },
+      }),
+    );
+
+    expect(result.headers['x-correlation-id']).toBe(kongId);
+    expect(logger.entries.every(({ entry }) => entry.correlationId === kongId)).toBe(true);
+  });
+
+  it('aceita body em texto quando o base64 do plugin está desligado', async () => {
+    const handler = createAuthHttpHandler(useCase, logger);
+
+    await handler(kongEvent(JSON.stringify({ cpf: '11144477735' }), { base64: false }));
+
+    expect(useCase.inputs).toEqual([{ cpf: '11144477735' }]);
+  });
+
+  it('body null do v1.0 vira 400 do contrato, nunca TypeError', async () => {
+    useCase.failure = new InvalidCpfError('inválido');
+    const handler = createAuthHttpHandler(useCase, logger);
+
+    const result = await handler(kongEvent(null));
+
+    expect(result.statusCode).toBe(400);
+    expect(useCase.inputs).toEqual([{ cpf: undefined }]);
+  });
+
+  it('JSON malformado no v1.0 vira 400, não erro de gateway', async () => {
+    const handler = createAuthHttpHandler(useCase, logger);
+
+    const result = await handler(kongEvent('{"cpf":'));
+
+    expect(result.statusCode).toBe(400);
+  });
+
+  it('401 do v1.0 é o mesmo do v2.0', async () => {
+    useCase.failure = new CustomerNotAuthorizedError('not_found');
+    const handler = createAuthHttpHandler(useCase, logger);
+
+    const result = await handler(kongEvent(JSON.stringify({ cpf: '55566677720' })));
+
+    expect(result.statusCode).toBe(401);
+    expect(parsedBody(result)).toEqual({
+      error: 'unauthorized',
+      message: 'CPF não autorizado',
+      correlationId: 'kong-request-id',
+    });
   });
 });

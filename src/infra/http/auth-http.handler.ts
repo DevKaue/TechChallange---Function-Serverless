@@ -1,54 +1,23 @@
-import type {
-  APIGatewayProxyEventV2,
-  APIGatewayProxyStructuredResultV2,
-} from 'aws-lambda';
 import type { AuthenticateCustomerUseCase } from '../../application/usecases/authenticate-customer.usecase';
 import { CustomerNotAuthorizedError } from '../../domain/errors/customer-not-authorized.error';
 import { DataSourceUnavailableError } from '../../domain/errors/data-source-unavailable.error';
 import { InvalidCpfError } from '../../domain/errors/invalid-cpf.error';
 import type { Logger } from '../logging/logger';
+import { correlationIdFrom } from './correlation';
+import {
+  type AuthHttpEvent,
+  type HttpRequest,
+  type InvocationContext,
+  toHttpRequest,
+} from './http-event';
+import {
+  type HttpResponse,
+  SERVICE_UNAVAILABLE_MESSAGE,
+  errorResponse,
+  jsonResponse,
+} from './http-response';
 
-const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
-
-function response(
-  statusCode: number,
-  body: object,
-  correlationId: string,
-): APIGatewayProxyStructuredResultV2 {
-  return {
-    statusCode,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'x-correlation-id': correlationId,
-    },
-    body: JSON.stringify(body),
-  };
-}
-
-function errorResponse(
-  statusCode: number,
-  error: string,
-  message: string,
-  correlationId: string,
-): APIGatewayProxyStructuredResultV2 {
-  return response(statusCode, { error, message, correlationId }, correlationId);
-}
-
-function getHeader(event: APIGatewayProxyEventV2, name: string): string | undefined {
-  const target = name.toLowerCase();
-  return Object.entries(event.headers).find(([key]) => key.toLowerCase() === target)?.[1];
-}
-
-function correlationIdFrom(event: APIGatewayProxyEventV2): string {
-  const candidate = getHeader(event, 'x-correlation-id');
-  // Header controlado pelo cliente entra em log. Sem allowlist de caracteres e
-  // tamanho, ele vira log injection ou cardinalidade sem limite no Datadog.
-  return candidate !== undefined && CORRELATION_ID_PATTERN.test(candidate)
-    ? candidate
-    : event.requestContext.requestId;
-}
-
-function parseBody(event: APIGatewayProxyEventV2): unknown {
+function parseBody(event: HttpRequest): unknown {
   if (event.body === undefined) return {};
 
   const raw = event.isBase64Encoded
@@ -61,10 +30,12 @@ function parseBody(event: APIGatewayProxyEventV2): unknown {
 /**
  * Cria o adapter HTTP com dependências explícitas.
  *
- * O handler NUNCA lança: no HTTP API payload 2.0, exceção não tratada vira
- * 502 do API Gateway, quebrando o contrato 400/401/503. Da mesma forma, retornar
- * objeto sem `statusCode` vira 200 automático. Por isso toda saída passa por
- * `response()` e o try/catch cobre inclusive JSON malformado.
+ * Aceita o evento v1.0 que o Kong envia e o v2.0 do HTTP API (ver
+ * `http-event.ts`); a resposta `{statusCode, headers, body}` é a mesma nos dois.
+ *
+ * O handler NUNCA lança: exceção não tratada vira 502 no gateway, quebrando o
+ * contrato 400/401/503. Por isso toda saída passa por `jsonResponse()` e o
+ * try/catch cobre inclusive JSON malformado.
  */
 export function createAuthHttpHandler(
   useCase: Pick<AuthenticateCustomerUseCase, 'execute'>,
@@ -74,10 +45,12 @@ export function createAuthHttpHandler(
   let firstInvocation = true;
 
   return async (
-    event: APIGatewayProxyEventV2,
-  ): Promise<APIGatewayProxyStructuredResultV2> => {
+    rawEvent: AuthHttpEvent,
+    context?: InvocationContext,
+  ): Promise<HttpResponse> => {
     const startedAt = now();
-    const requestId = event.requestContext.requestId;
+    const event = toHttpRequest(rawEvent, context);
+    const requestId = event.requestId;
     const correlationId = correlationIdFrom(event);
     const coldStart = firstInvocation;
     firstInvocation = false;
@@ -108,7 +81,7 @@ export function createAuthHttpHandler(
         coldStart,
       });
 
-      return response(200, output, correlationId);
+      return jsonResponse(200, output, correlationId);
     } catch (error) {
       const durationMs = now() - startedAt;
 
@@ -156,12 +129,7 @@ export function createAuthHttpHandler(
           reason: 'data_source_unavailable',
           errorCode: causeCode,
         });
-        return errorResponse(
-          503,
-          error.code,
-          'Serviço temporariamente indisponível',
-          correlationId,
-        );
+        return errorResponse(503, error.code, SERVICE_UNAVAILABLE_MESSAGE, correlationId);
       }
 
       logger.write('error', {
