@@ -1,16 +1,23 @@
-import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-
 export const SERVICE_UNAVAILABLE_MESSAGE = 'Serviço temporariamente indisponível';
 
 /**
- * Toda saída HTTP passa por aqui. No payload 2.0, objeto sem `statusCode` vira
- * 200 automático do API Gateway — centralizar impede esse 200 acidental.
+ * Mesmo formato para v1.0 e v2.0, e é o que o Kong lê com
+ * `is_proxy_integration: true`. Sem `statusCode` numérico o Kong não consegue
+ * montar a resposta e devolve erro de gateway; no HTTP API vira 200 automático.
+ * Centralizar aqui impede as duas coisas.
  */
+export interface HttpResponse {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: string;
+}
+
+/** Toda saída HTTP passa por aqui. */
 export function jsonResponse(
   statusCode: number,
   body: object,
   correlationId: string,
-): APIGatewayProxyStructuredResultV2 {
+): HttpResponse {
   return {
     statusCode,
     headers: {
@@ -26,6 +33,6 @@ export function errorResponse(
   error: string,
   message: string,
   correlationId: string,
-): APIGatewayProxyStructuredResultV2 {
+): HttpResponse {
   return jsonResponse(statusCode, { error, message, correlationId }, correlationId);
 }

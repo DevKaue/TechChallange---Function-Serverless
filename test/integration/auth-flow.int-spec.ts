@@ -1,6 +1,6 @@
 import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
-import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import type { APIGatewayProxyEvent, APIGatewayProxyEventV2 } from 'aws-lambda';
 import jwt, { type JwtPayload } from 'jsonwebtoken';
 import authResponseSchema from '../../contracts/auth-response.schema.json';
 import errors from '../../contracts/errors.json';
@@ -51,6 +51,24 @@ function httpEvent(body: unknown, correlationId?: string): APIGatewayProxyEventV
     isBase64Encoded: false,
     body: JSON.stringify(body),
   };
+}
+
+/** Evento v1.0 como o plugin aws-lambda do Kong envia (body em base64). */
+function kongEvent(payload: unknown, correlationId: string): APIGatewayProxyEvent {
+  return {
+    resource: '/auth',
+    path: '/auth',
+    httpMethod: 'POST',
+    headers: { 'content-type': 'application/json', 'x-correlation-id': correlationId },
+    multiValueHeaders: {},
+    queryStringParameters: null,
+    multiValueQueryStringParameters: null,
+    pathParameters: null,
+    stageVariables: null,
+    requestContext: { requestId: 'kong-integration-request-id' },
+    isBase64Encoded: true,
+    body: Buffer.from(JSON.stringify(payload)).toString('base64'),
+  } as unknown as APIGatewayProxyEvent;
 }
 
 function body(result: { body?: string | undefined }): Record<string, unknown> {
@@ -110,6 +128,20 @@ describe('Fluxo de autenticação ponta a ponta (sem API Gateway)', () => {
     expect(ajv.validate(tokenSchema, payload)).toBe(true);
     expect(payload.sub).toBe(SEED.ativo.id);
     expect(payload.exp! - payload.iat!).toBe(3600);
+  });
+
+  it('evento v1.0 do Kong segue o mesmo fluxo e emite o mesmo contrato de token', async () => {
+    const result = await handler(kongEvent({ cpf: '111.444.777-35' }, 'kong-uuid#7'));
+
+    expect(result.statusCode).toBe(200);
+    expect(result.headers['x-correlation-id']).toBe('kong-uuid#7');
+    const token = body(result).access_token as string;
+    const payload = jwt.verify(token, SECRET, {
+      algorithms: ['HS256'],
+      issuer: 'techchallenge-auth-lambda',
+    }) as JwtPayload;
+    expect(payload.sub).toBe(SEED.ativo.id);
+    expect(payload.type).toBe('customer');
   });
 
   it('duas autenticações seguidas geram jti diferentes', async () => {

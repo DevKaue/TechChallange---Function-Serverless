@@ -1,12 +1,11 @@
-const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+// O `#` está na lista por causa do Kong: o plugin correlation-id com
+// `generator: uuid#counter` gera `<uuid>#<n>`. Sem ele, todo id vindo do
+// gateway seria recusado e o log da Lambda perderia a correlação com o Kong.
+const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:#-]{1,128}$/;
 
-/**
- * O que os dois eventos do API Gateway (rota e Authorizer) têm em comum. No
- * evento do Authorizer `headers` é opcional, por isso o tipo aceita ausência.
- */
 export interface CorrelationSource {
   headers?: Record<string, string | undefined>;
-  requestContext: { requestId: string };
+  requestId: string;
 }
 
 export function getHeader(
@@ -21,11 +20,11 @@ export function getHeader(
 /**
  * Header controlado pelo cliente entra em log. Sem allowlist de caracteres e
  * tamanho, ele vira log injection ou cardinalidade sem limite no Datadog — por
- * isso qualquer valor fora do padrão cai para o requestId do API Gateway.
+ * isso qualquer valor fora do padrão cai para o requestId do evento.
  */
 export function correlationIdFrom(event: CorrelationSource): string {
   const candidate = getHeader(event.headers, 'x-correlation-id');
   return candidate !== undefined && CORRELATION_ID_PATTERN.test(candidate)
     ? candidate
-    : event.requestContext.requestId;
+    : event.requestId;
 }

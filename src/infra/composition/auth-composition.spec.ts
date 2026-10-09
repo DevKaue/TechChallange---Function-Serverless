@@ -1,10 +1,10 @@
-import type { APIGatewayProxyEventV2, APIGatewayRequestAuthorizerEventV2 } from 'aws-lambda';
+import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import jwt, { type JwtPayload } from 'jsonwebtoken';
 import type { PoolConfig } from 'pg';
 import type { SecretProvider } from '../../domain/contracts/secret-provider.interface';
 import type { AuthLogEntry, Logger } from '../logging/logger';
 import type { SqlClient } from '../repositories/pg-customer.repository';
-import { composeAuthHandler, composeAuthorizerHandler } from './auth-composition';
+import { composeAuthHandler } from './auth-composition';
 
 const JWT_PATH = '/techchallenge/homolog/auth/jwt-secret';
 const DB_PREFIX = '/techchallenge/homolog/db';
@@ -161,41 +161,5 @@ describe('composeAuthHandler', () => {
     await expect(composeAuthHandler(ports({ secrets }).value)).rejects.toThrow(
       `sem ${DB_PREFIX}/password`,
     );
-  });
-});
-
-describe('composeAuthorizerHandler', () => {
-  function authorizerEvent(authorization: string): APIGatewayRequestAuthorizerEventV2 {
-    return {
-      headers: { authorization },
-      requestContext: { requestId: 'req-2' },
-    } as unknown as APIGatewayRequestAuthorizerEventV2;
-  }
-
-  it('lê só o segredo JWT, sem exigir nada do banco', async () => {
-    const secrets = new SecretsStub();
-    const logger = new SilentLogger();
-
-    await composeAuthorizerHandler({
-      env: { APP_ENV: 'homolog', JWT_SECRET_SSM_PATH: JWT_PATH },
-      secrets,
-      logger,
-    });
-
-    expect(secrets.reads).toEqual([JWT_PATH]);
-  });
-
-  it('libera o token emitido pela função de autenticação montada com o mesmo SSM', async () => {
-    const secrets = new SecretsStub();
-    const auth = await composeAuthHandler(ports({ secrets }).value);
-    const authorizer = await composeAuthorizerHandler({ env: ENV, secrets, logger: new SilentLogger() });
-
-    const issued = await auth(httpEvent('11144477735'));
-    const token = (JSON.parse(issued.body ?? '{}') as { access_token: string }).access_token;
-
-    await expect(authorizer(authorizerEvent(`Bearer ${token}`))).resolves.toEqual({
-      isAuthorized: true,
-      context: { customerId: CUSTOMER_ID, principalType: 'customer' },
-    });
   });
 });

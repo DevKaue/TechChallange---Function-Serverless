@@ -1,4 +1,4 @@
-import { loadAuthorizerConfig, loadRuntimeConfig } from './runtime-config';
+import { loadRuntimeConfig } from './runtime-config';
 
 const VALID_ENV = {
   APP_ENV: 'homolog',
@@ -32,28 +32,5 @@ describe('loadRuntimeConfig', () => {
     expect(() => loadRuntimeConfig({ ...VALID_ENV, [name]: value })).toThrow(
       `${name} precisa ser um path SSM absoluto e normalizado.`,
     );
-  });
-});
-
-describe('loadAuthorizerConfig', () => {
-  it('não exige DB_SSM_PREFIX, que o Authorizer não usa', () => {
-    expect(
-      loadAuthorizerConfig({
-        APP_ENV: 'prod',
-        JWT_SECRET_SSM_PATH: '/techchallenge/prod/auth/jwt-secret',
-      }),
-    ).toEqual({ appEnv: 'prod', jwtSecretSsmPath: '/techchallenge/prod/auth/jwt-secret' });
-  });
-
-  it('falha no cold start sem o path do segredo', () => {
-    expect(() => loadAuthorizerConfig({ APP_ENV: 'prod' })).toThrow(
-      'Variável obrigatória ausente: JWT_SECRET_SSM_PATH',
-    );
-  });
-
-  it('recusa path relativo', () => {
-    expect(() =>
-      loadAuthorizerConfig({ APP_ENV: 'prod', JWT_SECRET_SSM_PATH: 'techchallenge/prod/jwt' }),
-    ).toThrow('JWT_SECRET_SSM_PATH precisa ser um path SSM absoluto e normalizado.');
   });
 });

@@ -1,18 +1,16 @@
 import type { PoolConfig } from 'pg';
 import { AuthenticateCustomerUseCase } from '../../application/usecases/authenticate-customer.usecase';
 import type { SecretProvider } from '../../domain/contracts/secret-provider.interface';
-import { loadAuthorizerConfig, loadRuntimeConfig } from '../config/runtime-config';
+import { loadRuntimeConfig } from '../config/runtime-config';
 import {
   DEFAULT_RDS_CA_BUNDLE_PATH,
   buildPoolConfig,
   loadDatabaseSettings,
 } from '../database/database-settings';
-import { createAuthorizerHandler } from '../http/authorizer-http.handler';
 import { createAuthHttpHandler } from '../http/auth-http.handler';
 import type { Logger } from '../logging/logger';
 import { PgCustomerRepository, type SqlClient } from '../repositories/pg-customer.repository';
 import { JsonWebTokenService } from '../security/jsonwebtoken-token.service';
-import { JsonWebTokenVerifier } from '../security/jsonwebtoken-token.verifier';
 import { RandomUuidGenerator } from '../security/random-uuid.generator';
 
 /**
@@ -52,16 +50,4 @@ export async function composeAuthHandler(ports: AuthCompositionPorts) {
   );
 
   return createAuthHttpHandler(useCase, ports.logger);
-}
-
-export interface AuthorizerCompositionPorts {
-  env: NodeJS.ProcessEnv;
-  secrets: SecretProvider;
-  logger: Logger;
-}
-
-export async function composeAuthorizerHandler(ports: AuthorizerCompositionPorts) {
-  const config = loadAuthorizerConfig(ports.env);
-  const secret = await ports.secrets.get(config.jwtSecretSsmPath);
-  return createAuthorizerHandler(new JsonWebTokenVerifier(secret), ports.logger);
 }

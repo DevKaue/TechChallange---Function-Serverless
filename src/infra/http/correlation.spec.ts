@@ -1,11 +1,11 @@
 import { correlationIdFrom, getHeader } from './correlation';
 
-const REQUEST_ID = 'api-gateway-request-id';
+const REQUEST_ID = 'gateway-request-id';
 
 function source(headers?: Record<string, string>) {
   return headers === undefined
-    ? { requestContext: { requestId: REQUEST_ID } }
-    : { headers, requestContext: { requestId: REQUEST_ID } };
+    ? { requestId: REQUEST_ID }
+    : { headers, requestId: REQUEST_ID };
 }
 
 describe('correlationIdFrom', () => {
@@ -30,7 +30,12 @@ describe('correlationIdFrom', () => {
     expect(correlationIdFrom(source({ 'X-Correlation-Id': id }))).toBe(id);
   });
 
-  it('funciona sem headers, como no evento do Authorizer', () => {
+  it('aceita o formato uuid#counter do plugin correlation-id do Kong', () => {
+    const id = '0f6c3d2e-6a1b-4c39-9a4e-0d7f5b2c8e11#3';
+    expect(correlationIdFrom(source({ 'x-correlation-id': id }))).toBe(id);
+  });
+
+  it('funciona sem headers', () => {
     expect(correlationIdFrom(source())).toBe(REQUEST_ID);
   });
 });

@@ -1,16 +1,23 @@
-import type {
-  APIGatewayProxyEventV2,
-  APIGatewayProxyStructuredResultV2,
-} from 'aws-lambda';
 import type { AuthenticateCustomerUseCase } from '../../application/usecases/authenticate-customer.usecase';
 import { CustomerNotAuthorizedError } from '../../domain/errors/customer-not-authorized.error';
 import { DataSourceUnavailableError } from '../../domain/errors/data-source-unavailable.error';
 import { InvalidCpfError } from '../../domain/errors/invalid-cpf.error';
 import type { Logger } from '../logging/logger';
 import { correlationIdFrom } from './correlation';
-import { SERVICE_UNAVAILABLE_MESSAGE, errorResponse, jsonResponse } from './http-response';
+import {
+  type AuthHttpEvent,
+  type HttpRequest,
+  type InvocationContext,
+  toHttpRequest,
+} from './http-event';
+import {
+  type HttpResponse,
+  SERVICE_UNAVAILABLE_MESSAGE,
+  errorResponse,
+  jsonResponse,
+} from './http-response';
 
-function parseBody(event: APIGatewayProxyEventV2): unknown {
+function parseBody(event: HttpRequest): unknown {
   if (event.body === undefined) return {};
 
   const raw = event.isBase64Encoded
@@ -23,10 +30,12 @@ function parseBody(event: APIGatewayProxyEventV2): unknown {
 /**
  * Cria o adapter HTTP com dependências explícitas.
  *
- * O handler NUNCA lança: no HTTP API payload 2.0, exceção não tratada vira
- * 502 do API Gateway, quebrando o contrato 400/401/503. Da mesma forma, retornar
- * objeto sem `statusCode` vira 200 automático. Por isso toda saída passa por
- * `jsonResponse()` e o try/catch cobre inclusive JSON malformado.
+ * Aceita o evento v1.0 que o Kong envia e o v2.0 do HTTP API (ver
+ * `http-event.ts`); a resposta `{statusCode, headers, body}` é a mesma nos dois.
+ *
+ * O handler NUNCA lança: exceção não tratada vira 502 no gateway, quebrando o
+ * contrato 400/401/503. Por isso toda saída passa por `jsonResponse()` e o
+ * try/catch cobre inclusive JSON malformado.
  */
 export function createAuthHttpHandler(
   useCase: Pick<AuthenticateCustomerUseCase, 'execute'>,
@@ -36,10 +45,12 @@ export function createAuthHttpHandler(
   let firstInvocation = true;
 
   return async (
-    event: APIGatewayProxyEventV2,
-  ): Promise<APIGatewayProxyStructuredResultV2> => {
+    rawEvent: AuthHttpEvent,
+    context?: InvocationContext,
+  ): Promise<HttpResponse> => {
     const startedAt = now();
-    const requestId = event.requestContext.requestId;
+    const event = toHttpRequest(rawEvent, context);
+    const requestId = event.requestId;
     const correlationId = correlationIdFrom(event);
     const coldStart = firstInvocation;
     firstInvocation = false;

@@ -1,10 +1,6 @@
-import type { APIGatewayProxyEventV2, APIGatewayRequestAuthorizerEventV2 } from 'aws-lambda';
+import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import type { AuthLogEntry, Logger } from '../logging/logger';
-import {
-  authBootstrapFailure,
-  authorizerBootstrapFailure,
-  createLazyHandler,
-} from './lazy-handler';
+import { authBootstrapFailure, createLazyHandler } from './lazy-handler';
 
 class LoggerSpy implements Logger {
   entries: Array<{ level: 'info' | 'warn' | 'error'; entry: AuthLogEntry }> = [];
@@ -139,20 +135,5 @@ describe('authBootstrapFailure', () => {
     const logger = new LoggerSpy();
     authBootstrapFailure(logger)(httpEvent(), 'string lançada');
     expect(logger.entries[0]?.entry.errorCode).toBe('unknown');
-  });
-});
-
-describe('authorizerBootstrapFailure', () => {
-  it('nega a rota protegida quando o segredo não carregou (fail closed)', () => {
-    const logger = new LoggerSpy();
-    const event = {
-      headers: {},
-      requestContext: { requestId: 'req-2' },
-    } as unknown as APIGatewayRequestAuthorizerEventV2;
-
-    expect(authorizerBootstrapFailure(logger)(event, new Error('x'))).toEqual({
-      isAuthorized: false,
-    });
-    expect(logger.entries[0]?.entry.event).toBe('bootstrap.error');
   });
 });
