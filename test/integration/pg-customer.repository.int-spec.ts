@@ -104,6 +104,9 @@ describe('PgCustomerRepository contra Postgres real', () => {
 
     it('status desconhecido no banco falha fechado, nunca vira cliente elegível', async () => {
       db = await createIsolatedSchema(CUSTOMERS_DDL);
+      // O drift real: a aplicação ganha um valor no enum por migration, e esta
+      // função ainda não o conhece.
+      await db.client.query(`ALTER TYPE "CustomerStatus" ADD VALUE 'PENDING'`);
       await seed(db.client, [{ ...SEED.ativo, status: 'PENDING' }]);
       const repository = new PgCustomerRepository(asSqlClient(db.client));
 

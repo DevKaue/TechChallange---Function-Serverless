@@ -16,22 +16,25 @@ export const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/postgres';
 
 /**
- * Espelho MÍNIMO da tabela `customers` da aplicação principal, só com as colunas
- * que a função lê, mais `name` para provar que a projeção não o traz.
+ * Espelho da tabela `customers` da aplicação principal DEPOIS da migration
+ * `20261009230000_add_status_to_customers` (Prisma): `id` é text, e
+ * `document_type` e `status` são enums do Postgres, não text. Só as colunas que
+ * a função lê, mais `name` para provar que a projeção não o traz.
  *
- * ATENÇÃO: isto é fixture, não fonte de verdade. O schema pertence ao
- * repositório da aplicação (migration do Prisma). Quando a migration da coluna
- * `status` existir lá, este DDL deve ser substituído pelo SQL gerado por ela —
- * senão o teste passa contra uma tabela que não é a de produção.
+ * ATENÇÃO: isto é fixture, não fonte de verdade. Mudou a migration no
+ * repositório da aplicação, muda aqui no mesmo dia, senão o teste passa contra
+ * uma tabela que não é a de produção.
  */
 export const CUSTOMERS_DDL = `
+  CREATE TYPE "DocumentType" AS ENUM ('CPF', 'CNPJ', 'PASSPORT', 'RNE');
+  CREATE TYPE "CustomerStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'BLOCKED');
   CREATE TABLE customers (
-    id            uuid        PRIMARY KEY,
-    name          text        NOT NULL,
-    document      text        NOT NULL,
-    document_type text        NOT NULL,
-    status        text        NOT NULL DEFAULT 'ACTIVE',
-    deleted_at    timestamptz NULL,
+    id            text             PRIMARY KEY,
+    name          text             NOT NULL,
+    document      text             NOT NULL,
+    document_type "DocumentType"   NOT NULL,
+    status        "CustomerStatus" NOT NULL DEFAULT 'ACTIVE',
+    deleted_at    timestamp(3)     NULL,
     CONSTRAINT customers_document_document_type_key UNIQUE (document, document_type)
   )
 `;
