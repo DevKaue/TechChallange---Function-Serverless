@@ -1,0 +1,66 @@
+graph TD
+    %% Estilos visuais
+    classDef person fill:#084298,stroke:#052c65,stroke-width:2px,color:#ffffff,rx:10px,ry:10px;
+    classDef systemBoundary fill:#e7f1ff,stroke:#0b4884,stroke-width:2px,color:#052c65,rx:10px,ry:10px;
+    classDef container fill:#1168bd,stroke:#0b4884,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+    classDef component fill:#1f78d1,stroke:#0b4884,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+    classDef sharedKernel fill:#0d5ca6,stroke:#083b6c,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+    classDef infra fill:#0a4f92,stroke:#063867,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+    classDef database fill:#0b4884,stroke:#052c65,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+    classDef extSystem fill:#999999,stroke:#666666,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+
+    %% Externos
+    K["🚪 <b>Kong API Gateway</b><br/><i>[Software System]</i><br/>Plugin aws-lambda"]:::extSystem
+    SSM["🔑 <b>SSM Parameter Store</b><br/><i>[Software System]</i>"]:::extSystem
+    DB[("🗄️ <b>RDS PostgreSQL</b><br/><i>[Container: Database]</i><br/>Tabela customers")]:::database
+    LOG[("📜 <b>CloudWatch Logs</b><br/><i>[Container]</i>")]:::database
+
+    %% Fronteira do sistema e container em foco
+    subgraph SB["🔐 Autenticação de cliente por CPF"]
+        direction TB
+        subgraph FNB["⚡ Função techchallenge-auth-env [Container: AWS Lambda, Node.js 22 + TypeScript]"]
+            direction TB
+
+            H["🧷 <b>handler.ts</b><br/><i>[Composition root]</i><br/>Instâncias concretas: Pool pg, SsmSecretProvider, logger"]:::infra
+            LZ["⏳ <b>createLazyHandler</b><br/><i>[Component: infra/http]</i><br/>Monta no primeiro request; falha vira 503, com nova tentativa"]:::component
+            CMP["🧩 <b>composeAuthHandler</b><br/><i>[Component: infra/composition]</i><br/>Lê config, SSM e CA e monta o caso de uso"]:::component
+            HTTP["🌐 <b>createAuthHttpHandler</b><br/><i>[Component: infra/http]</i><br/>Evento v1.0/v2.0, correlation id, mapeia erros para 400/401/503"]:::component
+
+            UC["🎯 <b>AuthenticateCustomerUseCase</b><br/><i>[Component: application]</i><br/>Valida CPF, busca cliente, checa elegibilidade, pede o token"]:::component
+            DOM["📐 <b>Domínio</b><br/><i>[Component: domain]</i><br/>Cpf (value object), Customer, CustomerStatus, erros e contratos"]:::sharedKernel
+
+            CFG["⚙️ <b>runtime-config + database-settings</b><br/><i>[Infrastructure Component]</i><br/>Paths SSM obrigatórios e Pool com TLS, max 1"]:::infra
+            SEC["🔑 <b>SsmSecretProvider</b><br/><i>[Infrastructure Component]</i><br/>GetParameter com decriptação, cache por path"]:::infra
+            REPO["🗃️ <b>PgCustomerRepository</b><br/><i>[Infrastructure Component]</i><br/>SELECT por document e document_type CPF"]:::infra
+            JWT["✍️ <b>JsonWebTokenService</b><br/><i>[Infrastructure Component]</i><br/>HS256, exp 3600 s, segredo com 32+ caracteres"]:::infra
+            UUID["🎲 <b>RandomUuidGenerator</b><br/><i>[Infrastructure Component]</i><br/>jti com crypto.randomUUID"]:::infra
+            LG["📝 <b>ConsoleJsonLogger</b><br/><i>[Infrastructure Component]</i><br/>Uma linha JSON por evento, sem CPF nem token"]:::infra
+        end
+    end
+    class SB systemBoundary
+    class FNB container
+
+    %% Entrada
+    K -->|"Invoke, evento v1.0"| H
+    H --> LZ
+    LZ -->|"primeira invocação"| CMP
+    LZ -->|"invocações seguintes"| HTTP
+
+    %% Montagem
+    CMP --> CFG
+    CMP --> SEC
+    CMP -->|"cria"| HTTP
+
+    %% Fluxo da requisição
+    HTTP -->|"execute(cpf)"| UC
+    UC -. "In-process" .-> DOM
+    UC -->|"findByCpf"| REPO
+    UC -->|"sign"| JWT
+    UC -->|"generate"| UUID
+    HTTP -->|"write"| LG
+    LZ -->|"bootstrap.error"| LG
+
+    %% Saídas
+    SEC -->|"HTTPS 443"| SSM
+    REPO -->|"SQL/TLS 5432"| DB
+    LG -->|"stdout"| LOG
