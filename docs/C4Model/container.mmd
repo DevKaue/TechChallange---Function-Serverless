@@ -1,0 +1,38 @@
+graph TD
+    %% Estilos das Classes (mantendo identidade visual do diagrama de contexto)
+    classDef person fill:#084298,stroke:#052c65,stroke-width:2px,color:#ffffff,rx:10px,ry:10px;
+    classDef systemBoundary fill:#e7f1ff,stroke:#0b4884,stroke-width:2px,color:#052c65,rx:10px,ry:10px;
+    classDef container fill:#1168bd,stroke:#0b4884,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+    classDef database fill:#0b4884,stroke:#052c65,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+    classDef extSystem fill:#999999,stroke:#666666,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+
+    %% Atores (Personas)
+    C["👤 <b>Cliente da oficina</b><br/><i>[Person]</i><br/>Autentica-se pelo CPF"]:::person
+
+    %% Sistemas externos
+    K["🚪 <b>Kong API Gateway</b><br/><i>[Software System: EKS]</i><br/>Plugins aws-lambda, jwt, rate-limiting e correlation-id"]:::extSystem
+    APP["🏢 <b>Aplicação principal</b><br/><i>[Software System: EKS]</i><br/>Revalida o JWT e autoriza"]:::extSystem
+    SSM["🔑 <b>SSM Parameter Store</b><br/><i>[Software System]</i><br/>/techchallenge/&lt;env&gt;/auth/jwt-secret e /techchallenge/&lt;env&gt;/db/*"]:::extSystem
+    DB[("🗄️ <b>RDS PostgreSQL</b><br/><i>[Container: Database, repositório de banco]</i><br/>Tabela customers")]:::database
+    GHA["⚙️ <b>GitHub Actions</b><br/><i>[Software System]</i><br/>ci.yml e deploy.yml"]:::extSystem
+
+    %% Fronteira do sistema (este repositório)
+    subgraph SB["🔐 Autenticação de cliente por CPF (este repositório)"]
+        direction TB
+        FN["⚡ <b>Função techchallenge-auth-&lt;env&gt;</b><br/><i>[Container: AWS Lambda, container image]</i><br/><b>Tecnologias:</b> Node.js 22, TypeScript, pg, jsonwebtoken, AWS SDK v3<br/>Handler handler.handler, 256 MB, timeout 9 s, subnets privadas, LabRole"]:::container
+        ECR[("📦 <b>Repositório de imagem</b><br/><i>[Container: Amazon ECR]</i><br/>techchallenge-auth-&lt;env&gt;, tag imutável, scan no push, 10 últimas imagens")]:::database
+        LOG[("📜 <b>Log group</b><br/><i>[Container: CloudWatch Logs]</i><br/>/aws/lambda/techchallenge-auth-&lt;env&gt;, retenção de 14 dias")]:::database
+    end
+    class SB systemBoundary
+
+    %% Relacionamentos
+    C -->|"HTTP + JSON: POST /auth"| K
+    K -->|"lambda:InvokeFunction, evento v1.0, timeout 10 s"| FN
+    K -->|"HTTP + Bearer JWT validado"| APP
+    FN -->|"HTTPS 443 pelo NAT: GetParameter"| SSM
+    FN -->|"SQL/TLS 5432, SG de cliente do banco"| DB
+    FN -->|"Uma linha JSON por evento"| LOG
+    ECR -.->|"Imagem da versão (image_uri)"| FN
+    GHA -->|"docker push da tag v&lt;run_number&gt;"| ECR
+    GHA -->|"terraform apply"| FN
+    APP -->|"SQL/TCP 5432"| DB

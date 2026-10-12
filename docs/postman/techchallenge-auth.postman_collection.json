@@ -1,0 +1,509 @@
+{
+  "info": {
+    "name": "TechChallenge - Autenticação por CPF",
+    "description": "Coleção do `POST /auth` da função `techchallenge-auth-<env>`, invocada pelo Kong.\n\nContrato completo em `docs/api/openapi.yaml`. Todos os CPFs são sintéticos, da massa de teste do repositório: nunca use um CPF real.\n\nVariáveis:\n- `baseUrl`: proxy do Kong do ambiente (DNS do NLB, sem barra no fim).\n- `cpf`: CPF sintético ACTIVE e não arquivado no banco do ambiente (o mesmo de `SMOKE_CPF_ATIVO`). O padrão é o cliente ativo da massa de teste e só devolve 200 se existir no seed do ambiente.\n- `protectedUrl`: uma rota de cliente atrás do plugin `jwt` do Kong, para o teste com o token.\n- `rieUrl`: endpoint do Runtime Interface Emulator da imagem rodando local.\n\nO Kong limita o `/auth` a 10 requisições por minuto por IP: rodar a coleção inteira repetidas vezes começa a devolver 429, que não é falha da função.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "cpf",
+      "value": "11144477735",
+      "type": "string"
+    },
+    {
+      "key": "cpfMascarado",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cpfNuncaCadastrado",
+      "value": "55566677720",
+      "type": "string"
+    },
+    {
+      "key": "cpfDvInvalido",
+      "value": "11144477734",
+      "type": "string"
+    },
+    {
+      "key": "protectedUrl",
+      "value": "http://localhost:8000/api/rota-de-cliente",
+      "type": "string"
+    },
+    {
+      "key": "rieUrl",
+      "value": "http://localhost:9000",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Kong - POST /auth",
+      "description": "Chamadas pelo caminho real do cliente: Kong, plugin aws-lambda, função.",
+      "item": [
+        {
+          "name": "200 - cliente ativo (sem máscara)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('x-correlation-id ecoado', () => pm.expect(pm.response.headers.get('x-correlation-id')).to.be.a('string').and.not.empty);",
+                  "pm.test('corpo do 200 no contrato', () => { const b = pm.response.json(); pm.expect(Object.keys(b).sort()).to.eql(['access_token', 'expires_in', 'token_type']); pm.expect(b.token_type).to.eql('Bearer'); pm.expect(b.expires_in).to.eql(3600); });",
+                  "pm.test('JWT de cliente sem dado pessoal', () => { const seg = pm.response.json().access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); const p = JSON.parse(atob(seg + '='.repeat((4 - seg.length % 4) % 4))); pm.expect(p.iss).to.eql('techchallenge-auth-lambda'); pm.expect(p.type).to.eql('customer'); pm.expect(p.exp - p.iat).to.eql(3600); ['cpf', 'email', 'name', 'role'].forEach((k) => pm.expect(p).to.not.have.property(k)); });",
+                  "pm.collectionVariables.set('accessToken', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "postman-{{$timestamp}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cpf\": \"{{cpf}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth"
+              ]
+            },
+            "description": "CPF válido de cliente ACTIVE e não arquivado. Guarda o token em `accessToken` para a rota protegida."
+          }
+        },
+        {
+          "name": "200 - cliente ativo (com máscara)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('x-correlation-id ecoado', () => pm.expect(pm.response.headers.get('x-correlation-id')).to.be.a('string').and.not.empty);",
+                  "pm.test('corpo do 200 no contrato', () => { const b = pm.response.json(); pm.expect(Object.keys(b).sort()).to.eql(['access_token', 'expires_in', 'token_type']); pm.expect(b.token_type).to.eql('Bearer'); pm.expect(b.expires_in).to.eql(3600); });",
+                  "pm.test('JWT de cliente sem dado pessoal', () => { const seg = pm.response.json().access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); const p = JSON.parse(atob(seg + '='.repeat((4 - seg.length % 4) % 4))); pm.expect(p.iss).to.eql('techchallenge-auth-lambda'); pm.expect(p.type).to.eql('customer'); pm.expect(p.exp - p.iat).to.eql(3600); ['cpf', 'email', 'name', 'role'].forEach((k) => pm.expect(p).to.not.have.property(k)); });"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.collectionVariables.get('cpf');",
+                  "pm.collectionVariables.set('cpfMascarado', `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "postman-{{$timestamp}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cpf\": \"{{cpfMascarado}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth"
+              ]
+            },
+            "description": "O mesmo `cpf`, no formato 000.000.000-00, montado pelo script de pré-requisição. Prova que com e sem máscara resolvem para o mesmo cliente."
+          }
+        },
+        {
+          "name": "400 - dígito verificador inválido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('x-correlation-id ecoado', () => pm.expect(pm.response.headers.get('x-correlation-id')).to.be.a('string').and.not.empty);",
+                  "pm.test('corpo de erro do contrato', () => { const b = pm.response.json(); pm.expect(b.error).to.eql('invalid_request'); pm.expect(b.message).to.eql('CPF inválido'); pm.expect(b.correlationId).to.eql(pm.response.headers.get('x-correlation-id')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "postman-{{$timestamp}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cpf\": \"{{cpfDvInvalido}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth"
+              ]
+            },
+            "description": "Recusado antes de qualquer consulta ao banco."
+          }
+        },
+        {
+          "name": "400 - formato com lixo ao redor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('x-correlation-id ecoado', () => pm.expect(pm.response.headers.get('x-correlation-id')).to.be.a('string').and.not.empty);",
+                  "pm.test('corpo de erro do contrato', () => { const b = pm.response.json(); pm.expect(b.error).to.eql('invalid_request'); pm.expect(b.message).to.eql('CPF inválido'); pm.expect(b.correlationId).to.eql(pm.response.headers.get('x-correlation-id')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "postman-{{$timestamp}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cpf\": \"abc11144477735xyz\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth"
+              ]
+            },
+            "description": "O formato é conferido antes de normalizar: lixo ao redor de 11 dígitos válidos é recusado."
+          }
+        },
+        {
+          "name": "400 - CPF como número JSON",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('x-correlation-id ecoado', () => pm.expect(pm.response.headers.get('x-correlation-id')).to.be.a('string').and.not.empty);",
+                  "pm.test('corpo de erro do contrato', () => { const b = pm.response.json(); pm.expect(b.error).to.eql('invalid_request'); pm.expect(b.message).to.eql('CPF inválido'); pm.expect(b.correlationId).to.eql(pm.response.headers.get('x-correlation-id')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "postman-{{$timestamp}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cpf\": 11144477735\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth"
+              ]
+            },
+            "description": "O campo precisa ser string: número JSON perderia zeros à esquerda."
+          }
+        },
+        {
+          "name": "400 - JSON malformado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('x-correlation-id ecoado', () => pm.expect(pm.response.headers.get('x-correlation-id')).to.be.a('string').and.not.empty);",
+                  "pm.test('corpo de erro do contrato', () => { const b = pm.response.json(); pm.expect(b.error).to.eql('invalid_request'); pm.expect(b.message).to.eql('CPF inválido'); pm.expect(b.correlationId).to.eql(pm.response.headers.get('x-correlation-id')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "postman-{{$timestamp}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"cpf\":",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth"
+              ]
+            },
+            "description": "Corpo inválido vira 400 do contrato, nunca 502 do gateway."
+          }
+        },
+        {
+          "name": "401 - CPF nunca cadastrado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('x-correlation-id ecoado', () => pm.expect(pm.response.headers.get('x-correlation-id')).to.be.a('string').and.not.empty);",
+                  "pm.test('corpo de erro do contrato', () => { const b = pm.response.json(); pm.expect(b.error).to.eql('unauthorized'); pm.expect(b.message).to.eql('CPF não autorizado'); pm.expect(b.correlationId).to.eql(pm.response.headers.get('x-correlation-id')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "postman-{{$timestamp}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cpf\": \"{{cpfNuncaCadastrado}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth"
+              ]
+            },
+            "description": "DV válido e inexistente na base. A resposta é idêntica à de cliente arquivado, inativo ou bloqueado; o motivo fica só no log (`auth.denied`)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Kong - rota protegida",
+      "description": "Valida o token emitido acima no plugin `jwt` do Kong. Rode antes o `200 - cliente ativo (sem máscara)`.",
+      "item": [
+        {
+          "name": "401 - sem token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401 no gateway', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{protectedUrl}}",
+            "description": "Sem Authorization, o plugin jwt recusa antes de a requisição chegar à aplicação."
+          }
+        },
+        {
+          "name": "com Bearer token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('não recusado pelo gateway', () => pm.expect(pm.response.code).to.not.eql(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{protectedUrl}}",
+            "description": "O Kong valida assinatura HS256, consumer pelo iss e exp. A resposta final depende da aplicação aceitar `type: customer` na rota escolhida."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Local - imagem com RIE",
+      "description": "Invoca a imagem rodando local (`docker run -p 9000:8080`) com um evento v1.0 igual ao do Kong. Sem credencial da AWS, a resposta esperada é o 503 de bootstrap.",
+      "item": [
+        {
+          "name": "Evento v1.0 do Kong - 503 sem AWS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('invocação aceita pelo RIE', () => pm.response.to.have.status(200));",
+                  "pm.test('503 de bootstrap no contrato', () => { const r = pm.response.json(); pm.expect(r.statusCode).to.eql(503); pm.expect(r.headers['x-correlation-id']).to.eql('local-rie#1'); pm.expect(JSON.parse(r.body).error).to.eql('service_unavailable'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"httpMethod\": \"POST\",\n  \"path\": \"/auth\",\n  \"headers\": {\n    \"content-type\": \"application/json\",\n    \"x-correlation-id\": \"local-rie#1\"\n  },\n  \"body\": \"eyJjcGYiOiIxMTE0NDQ3NzczNSJ9\",\n  \"isBase64Encoded\": true,\n  \"requestContext\": {\n    \"requestId\": \"local-req\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{rieUrl}}/2015-03-31/functions/function/invocations",
+              "host": [
+                "{{rieUrl}}"
+              ],
+              "path": [
+                "2015-03-31",
+                "functions",
+                "function",
+                "invocations"
+              ]
+            },
+            "description": "O body está em base64 (`{\"cpf\":\"11144477735\"}`), como o plugin aws-lambda envia por padrão. O status HTTP do RIE é sempre 200; o status do contrato vem em `statusCode`."
+          }
+        }
+      ]
+    }
+  ]
+}
