@@ -1,10 +1,11 @@
 name: Deploy
 
-# develop publica techchallenge-auth-staging; main publica techchallenge-auth-prod.
+# develop e homolog publicam techchallenge-auth-staging; main publica
+# techchallenge-auth-prod.
 # São os únicos nomes que o Kong tem permissão de invocar (ADR-002).
 on:
   push:
-    branches: [develop, main]
+    branches: [develop, homolog, main]
   workflow_dispatch:
     inputs:
       image_tag:

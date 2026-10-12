@@ -26,8 +26,8 @@ que também valida os tokens nas rotas protegidas com o plugin `jwt`.
 |---|---|---|---|
 | `techchallenge-auth-<env>` | `POST /auth` com `{"cpf": "..."}`, invocada pelo plugin `aws-lambda` do Kong | `handler.handler` | Valida o CPF (formato e dígitos verificadores) antes de qualquer I/O, consulta existência e status do cliente no Postgres gerenciado e devolve um JWT HS256 de 1 h |
 
-`<env>` é `staging` para a `develop` e `prod` para a `main`: é o único nome que o Kong tem
-permissão de invocar.
+`<env>` é `staging` para a `develop` e a `homolog`, e `prod` para a `main`: é o único nome
+que o Kong tem permissão de invocar.
 
 A função monta as dependências na **primeira requisição** do container, lendo segredos e o
 contrato de descoberta do banco pelo SSM, e reaproveita nas seguintes. Falha nessa montagem
@@ -134,7 +134,7 @@ cd infra/terraform/modules/function && terraform init -backend=false && terrafor
 ### Deploy
 
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) roda no push para `develop`
-(staging) e `main` (prod):
+e `homolog` (staging) e para `main` (prod):
 
 1. Cria o repositório ECR, se ainda não existir.
 2. Builda e publica a imagem com a tag `v<run_number>`.
