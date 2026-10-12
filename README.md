@@ -16,11 +16,9 @@ que também valida os tokens nas rotas protegidas com o plugin `jwt`.
 | [tech-challenge-app-](https://github.com/DevKaue/tech-challenge-app-) | Aplicação da Fase 3, com as rotas do Kong (ADR-005, RFC-001) |
 | [TechChallenge---Infraestrutura-Kubernetes-com-Terraform](https://github.com/DevKaue/TechChallenge---Infraestrutura-Kubernetes-com-Terraform) | EKS, Kong e o segredo JWT no SSM |
 
-> **Status: código da função completo, deploy pendente.** Domínio, caso de uso, adaptador
-> HTTP (eventos v1.0 do Kong e v2.0), composição no cold start estão implementados e
-> testados (unitário, integração com Postgres real e smoke E2E). Faltam a imagem, o
-> Terraform da função e o workflow de deploy. Seções com comentário `M2`/`M5` ainda serão
-> preenchidas.
+> **Status: código, imagem, Terraform e workflow de deploy prontos; primeiro deploy
+> pendente.** O apply depende da infra Kubernetes (VPC, segredo JWT no SSM) e do banco do
+> mesmo ambiente estarem no ar. Seções com comentário `M2` ainda serão preenchidas.
 
 ## Propósito
 
@@ -28,8 +26,8 @@ que também valida os tokens nas rotas protegidas com o plugin `jwt`.
 |---|---|---|---|
 | `techchallenge-auth-<env>` | `POST /auth` com `{"cpf": "..."}`, invocada pelo plugin `aws-lambda` do Kong | `handler.handler` | Valida o CPF (formato e dígitos verificadores) antes de qualquer I/O, consulta existência e status do cliente no Postgres gerenciado e devolve um JWT HS256 de 1 h |
 
-`<env>` é `staging` para a `develop` e `prod` para a `main`: é o único nome que o Kong tem
-permissão de invocar.
+`<env>` é `staging` para a `develop` e a `homolog`, e `prod` para a `main`: é o único nome
+que o Kong tem permissão de invocar.
 
 A função monta as dependências na **primeira requisição** do container, lendo segredos e o
 contrato de descoberta do banco pelo SSM, e reaproveita nas seguintes. Falha nessa montagem
@@ -94,7 +92,61 @@ PROTECTED_URL=http://<nlb-do-kong>/api/<rota de cliente> \
 test/e2e/smoke-auth.sh
 ```
 
-<!-- M5 — Dockerfile, Runtime Interface Emulator e deploy por alias com rollback -->
+### Imagem
+
+O [`Dockerfile`](Dockerfile) gera a imagem da função sobre `public.ecr.aws/lambda/nodejs:22`,
+com o JavaScript compilado, as dependências de produção e o bundle de CAs do RDS em
+`/var/task/certs/global-bundle.pem`. A imagem base traz o Runtime Interface Emulator, e o
+CI invoca a imagem real com um evento v1.0 do Kong:
+
+```bash
+docker build --provenance=false -t techchallenge-auth:local .
+docker run --rm -p 9000:8080 -e APP_ENV=local \
+  -e JWT_SECRET_SSM_PATH=/techchallenge/staging/auth/jwt-secret \
+  -e DB_SSM_PREFIX=/techchallenge/staging/db techchallenge-auth:local
+curl -s localhost:9000/2015-03-31/functions/function/invocations \
+  -d '{"httpMethod":"POST","path":"/auth","headers":{},"body":"{\"cpf\":\"11144477735\"}","isBase64Encoded":false,"requestContext":{"requestId":"local"}}'
+```
+
+Sem credencial da AWS, a resposta esperada é o 503 de bootstrap, com `correlationId`.
+
+### Terraform da função
+
+[`infra/terraform`](infra/terraform) segue o mesmo desenho do repositório de banco: um
+módulo e um diretório por ambiente, com a key do state literal (`lambda/<env>/terraform.tfstate`).
+
+| Recurso | Observação |
+|---|---|
+| `aws_lambda_function` `techchallenge-auth-<env>` | Imagem do ECR, timeout de 9 s (o plugin do Kong espera 10 s), nas subnets privadas da VPC do ambiente |
+| Role de execução | **LabRole**, lida por data source: o AWS Academy não permite criar roles |
+| `aws_ecr_repository` `techchallenge-auth-<env>` | Tag imutável, scan no push, mantém as 10 últimas imagens |
+| Security groups | SG de cliente publicado pelo banco (Postgres) e um SG próprio só com saída HTTPS (SSM) |
+| `aws_cloudwatch_log_group` | Retenção de 14 dias, criado antes da função |
+
+Não há API Gateway, Authorizer nem permissão de invocação neste Terraform: o Kong invoca
+com a credencial do nó (LabRole), e fora do Academy a permissão é a role IRSA criada pela
+infra Kubernetes.
+
+```bash
+cd infra/terraform/modules/function && terraform init -backend=false && terraform test
+```
+
+### Deploy
+
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) roda no push para `develop`
+e `homolog` (staging) e para `main` (prod):
+
+1. Cria o repositório ECR, se ainda não existir.
+2. Builda e publica a imagem com a tag `v<run_number>`.
+3. Aplica o Terraform do ambiente com essa tag e espera a função ficar ativa.
+4. Roda o smoke pelo Kong, quando `KONG_URL` está configurada no environment.
+
+Rollback: `workflow_dispatch` com `image_tag` de uma versão anterior, sem novo build.
+
+Credenciais, por environment do GitHub (`staging` e `production`): `AWS_DEPLOY_ROLE` quando
+houver OIDC; no AWS Academy, `AWS_LAB_ACCESS_KEY_ID`, `AWS_LAB_SECRET_ACCESS_KEY` e
+`AWS_LAB_SESSION_TOKEN`, que expiram com a sessão do lab e precisam ser atualizadas antes
+de cada deploy. Use um dos dois conjuntos, nunca os dois.
 
 ## Diagrama da arquitetura deste repositório
 
@@ -151,12 +203,12 @@ O token nunca é registrado em log, em nenhuma forma.
 
 | Dívida | Por que foi aceita | Quando deixa de ser aceitável |
 |---|---|---|
+| Credenciais do lab coladas como secret a cada sessão | O AWS Academy não deixa criar a role do OIDC | Fora do Academy: aí só `AWS_DEPLOY_ROLE` |
 | O gateway não consulta o status do cliente | O plugin `jwt` do Kong valida só o token; consultar o banco a cada requisição protegida multiplicaria conexões no RDS | Quando bloquear um cliente precisar valer em menos de 1 h (o `exp` do token) |
 | Kong invoca a função com a LabRole do nó | O AWS Academy não permite criar roles, então não há IRSA | Fora do Academy: qualquer pod do nó poderia invocar a função |
 | Segredo HS256 compartilhado com a aplicação principal | Mesmo algoritmo e segredo que a aplicação já valida, sem mudança do lado de lá | Quando um terceiro precisar validar tokens: aí o caminho é RS256 com JWKS |
 | Sem RDS Proxy | `max: 1` por container e tráfego acadêmico; o alarme de conexões do repositório de banco é o gatilho | Quando o alarme `rds-conexoes` disparar |
 
-<!-- M2 — completar com as dívidas de empacotamento e deploy -->
 
 ## Documentação
 
