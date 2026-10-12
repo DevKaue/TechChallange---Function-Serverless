@@ -141,9 +141,10 @@ unitária.
 - `application/` não importa framework nem SDK
 - `infra/` concentra os adapters
 
-**Nenhum import de `aws-lambda`, `@aws-sdk/*` ou `pg` fora de `src/infra/`** — exceto
-`src/handler.ts` e `src/authorizer.handler.ts`, que são adaptadores por definição. A regra
-é aplicada por `no-restricted-imports` no ESLint.
+**`src/domain/` não importa `aws-lambda`, `@aws-sdk/*`, `pg`, `jsonwebtoken` nem nada de
+`infra/`.** A regra é aplicada por `no-restricted-imports` no ESLint, só em `src/domain/**`.
+Fora do domínio, esses imports ficam em `src/infra/` por convenção de revisão, com exceção
+de `src/handler.ts`, que é adaptador por definição.
 
 O base tem `presentation/` porque lá convivem controllers, guards, strategies e decorators
 do NestJS ao lado dos adapters de `infra/`. Numa função de uma rota, "presentation" seria
