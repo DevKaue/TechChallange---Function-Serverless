@@ -111,7 +111,7 @@ correspondente** também: ignore órfão é ruído e enfraquece o arquivo.
 3. Commits conformes ao R1; teste ao lado do código
 4. PR para `develop`, preenchendo o template — inclusive o impacto de custo
 5. Checks verdes; **squash** no merge
-6. Promoção `develop → homolog` (merge commit) dispara o deploy de homologação
+6. O merge na `develop` dispara o deploy de staging; a promoção `develop → homolog` (merge commit) não faz deploy
 7. Promoção `homolog → main` (merge commit) para no gate de produção e espera aprovação
 
 Nada entra direto em `main`, `homolog` ou `develop`. O único commit direto da história

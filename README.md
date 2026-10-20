@@ -36,7 +36,7 @@ RS256/JWKS, autenticação dentro da aplicação), está na
 |---|---|---|---|
 | `techchallenge-auth-<env>` | `POST /auth` com `{"cpf": "..."}`, invocada pelo plugin `aws-lambda` do Kong | `handler.handler` | Valida o CPF (formato e dígitos verificadores) antes de qualquer I/O, consulta existência e status do cliente no Postgres gerenciado e devolve um JWT HS256 de 1 h |
 
-`<env>` é `staging` para a `develop` e a `homolog`, e `prod` para a `main`: é o único nome
+`<env>` é `staging` para a `develop` e `prod` para a `main`: é o único nome
 que o Kong tem permissão de invocar.
 
 O que **não** se aplica a este repositório, e por quê:
@@ -229,7 +229,7 @@ graph TB
             C5["imagem<br/>docker build + evento v1.0<br/>contra o RIE: espera 503 de bootstrap"]
         end
 
-        subgraph DEPLOY["deploy.yml - push em develop/homolog (staging) e main (production)"]
+        subgraph DEPLOY["deploy.yml - push em develop (staging) e main (production)"]
             direction TB
             D1["1. Resolver a tag<br/>v&lt;run_number&gt; ou image_tag do dispatch"]
             D2["2. Credenciais AWS<br/>OIDC (AWS_DEPLOY_ROLE) ou lab (AWS_LAB_*)"]
@@ -262,7 +262,7 @@ graph TB
     end
 
     DEV -->|"PR / push"| CI
-    DEV -->|"merge em develop, homolog ou main"| DEPLOY
+    DEV -->|"merge em develop ou main"| DEPLOY
     DEV -->|"workflow_dispatch com image_tag (rollback)"| D1
 
     C2 ~~~ C3
@@ -436,7 +436,8 @@ cd infra/terraform/modules/function && terraform init -backend=false && terrafor
 ### Pipeline
 
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) roda no push para `develop`
-e `homolog` (staging) e para `main` (prod):
+(staging) e para `main` (prod). A `homolog` não faz deploy, como nos outros três
+repositórios:
 
 1. Cria o repositório ECR, se ainda não existir.
 2. Builda e publica a imagem com a tag `v<run_number>`.

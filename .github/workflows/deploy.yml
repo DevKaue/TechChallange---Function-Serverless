@@ -1,11 +1,13 @@
 name: Deploy
 
-# develop e homolog publicam techchallenge-auth-staging; main publica
-# techchallenge-auth-prod.
+# develop publica techchallenge-auth-staging; main publica techchallenge-auth-prod.
+# A homolog não faz deploy: é o mesmo modelo da infra Kubernetes, do app e do
+# banco, e com ela nos gatilhos cada promoção publicaria o staging duas vezes,
+# às vezes com commits diferentes.
 # São os únicos nomes que o Kong tem permissão de invocar (ADR-002).
 on:
   push:
-    branches: [develop, homolog, main]
+    branches: [develop, main]
   workflow_dispatch:
     inputs:
       image_tag:

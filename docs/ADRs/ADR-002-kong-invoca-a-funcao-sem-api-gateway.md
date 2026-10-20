@@ -21,7 +21,8 @@ trocou o AWS API Gateway pelo Kong rodando no EKS. Para este repositório, isso 
    O Lambda Authorizer da F3 ([ADR-001](ADR-001-composicao-no-primeiro-request-e-authorizer-sem-banco.md))
    deixa de ter quem o chame.
 3. O Kong só tem permissão de invocar `techchallenge-auth-<env>`, com `staging` para a
-   `develop` e a `homolog`, e `prod` para a `main`.
+   `develop` e `prod` para a `main`. A `homolog` não faz deploy, como na infra Kubernetes,
+   no app e no banco.
 4. No AWS Academy a conta não permite criar roles. A função roda com a **LabRole**
    existente, e o Kong invoca com a LabRole do nó, via IMDSv2.
 

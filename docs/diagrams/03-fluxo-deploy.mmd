@@ -21,7 +21,7 @@ graph TB
             C5["imagem<br/>docker build + evento v1.0<br/>contra o RIE: espera 503 de bootstrap"]
         end
 
-        subgraph DEPLOY["deploy.yml - push em develop/homolog (staging) e main (production)"]
+        subgraph DEPLOY["deploy.yml - push em develop (staging) e main (production)"]
             direction TB
             D1["1. Resolver a tag<br/>v&lt;run_number&gt; ou image_tag do dispatch"]
             D2["2. Credenciais AWS<br/>OIDC (AWS_DEPLOY_ROLE) ou lab (AWS_LAB_*)"]
@@ -54,7 +54,7 @@ graph TB
     end
 
     DEV -->|"PR / push"| CI
-    DEV -->|"merge em develop, homolog ou main"| DEPLOY
+    DEV -->|"merge em develop ou main"| DEPLOY
     DEV -->|"workflow_dispatch com image_tag (rollback)"| D1
 
     C2 ~~~ C3
