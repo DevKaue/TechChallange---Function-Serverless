@@ -233,7 +233,7 @@ graph TB
             direction TB
             D1["1. Resolver a tag<br/>v&lt;run_number&gt; ou image_tag do dispatch"]
             D2["2. Credenciais AWS<br/>OIDC (AWS_DEPLOY_ROLE) ou lab (AWS_LAB_*)"]
-            D3["3. terraform init<br/>state lambda/&lt;env&gt;/terraform.tfstate"]
+            D3["3. terraform init<br/>bucket de TF_STATE_BUCKET<br/>state lambda/&lt;env&gt;/terraform.tfstate"]
             D4["4. Garantir o ECR<br/>apply -target do repositório e lifecycle"]
             D5["5. Login no ECR"]
             D6["6. Build + push<br/>--provenance=false"]
@@ -253,7 +253,7 @@ graph TB
         RDS[("RDS PostgreSQL<br/>repositório de banco")]
     end
 
-    S3[("S3 techchallenge-fiap-v1<br/>state do Terraform")]
+    S3[("S3 TF_STATE_BUCKET<br/>state do Terraform")]
 
     subgraph LOCAL["Desenvolvimento local"]
         LT["npm test + npm run test:integration"]
@@ -409,7 +409,9 @@ Sem credencial da AWS, a resposta esperada é o 503 de bootstrap, com `correlati
 
 [`infra/terraform`](infra/terraform) segue o mesmo desenho do repositório de banco: um
 módulo e um diretório por ambiente, com a key do state literal (`lambda/<env>/terraform.tfstate`)
-no bucket `techchallenge-fiap-v1`, com lock nativo do S3 (`use_lockfile`).
+no bucket compartilhado do bootstrap da infra Kubernetes, com lock nativo do S3
+(`use_lockfile`). O nome do bucket não fica no código: entra no `init` por
+`-backend-config`, da variável `TF_STATE_BUCKET`.
 
 | Recurso | Observação |
 |---|---|

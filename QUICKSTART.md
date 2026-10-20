@@ -142,6 +142,8 @@ função, a LabRole, os paths do SSM e a rede — o que o Kong e os outros repos
      `/techchallenge/<env>/auth/jwt-secret`.
   2. [Banco de dados](https://github.com/DevKaue/tech-challenge-database-infra): RDS e os
      parâmetros `/techchallenge/<env>/db/{host,port,name,username,password,client-sg-id}`.
+     **Sem o banco aplicado, o plan desta função falha**: o Terraform lê o
+     `client-sg-id` do SSM para anexar o SG de cliente à função.
   3. [Aplicação](https://github.com/DevKaue/tech-challenge-app-): migrations aplicadas (a
      tabela `customers` com a coluna `status`) e um cliente sintético `ACTIVE` no seed, para
      o smoke.
@@ -161,15 +163,25 @@ Precisa listar o segredo JWT, os parâmetros do banco (entre eles `host`, `port`
 
 ### Passo 1 — bucket do state (uma vez por conta AWS)
 
+O bucket é criado pelo bootstrap da infraestrutura Kubernetes e compartilhado pelos
+quatro repositórios; esta função usa as keys `lambda/staging/terraform.tfstate` e
+`lambda/prod/terraform.tfstate`. O nome **não** está no código: nome de bucket é global, e
+cada conta do AWS Academy precisa do seu. Ele entra no `init` por configuração parcial do
+backend:
+
 ```bash
-aws s3api create-bucket --bucket techchallenge-fiap-v1 --region us-east-1
-aws s3api put-bucket-versioning --bucket techchallenge-fiap-v1 --versioning-configuration Status=Enabled
-aws s3api put-public-access-block --bucket techchallenge-fiap-v1 \
-  --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+export TF_STATE_BUCKET=<nome do bucket do bootstrap>
+aws s3api head-bucket --bucket "$TF_STATE_BUCKET"   # precisa responder sem erro
 ```
 
-> É o mesmo bucket dos outros repositórios. Se ele já existe, pule este passo. Esta função
-> usa as keys `lambda/staging/terraform.tfstate` e `lambda/prod/terraform.tfstate`.
+Rodando este repositório sozinho, crie um com nome único:
+
+```bash
+aws s3api create-bucket --bucket "$TF_STATE_BUCKET" --region us-east-1
+aws s3api put-bucket-versioning --bucket "$TF_STATE_BUCKET" --versioning-configuration Status=Enabled
+aws s3api put-public-access-block --bucket "$TF_STATE_BUCKET" \
+  --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+```
 
 ### Passo 2 — secrets e variáveis nos environments do GitHub
 
@@ -184,11 +196,14 @@ Credenciais — **um** dos dois conjuntos por environment, nunca os dois:
 | OIDC | `AWS_DEPLOY_ROLE` (ARN da role) | Conta em que é possível criar a role e o provider OIDC |
 | AWS Academy | `AWS_LAB_ACCESS_KEY_ID`, `AWS_LAB_SECRET_ACCESS_KEY`, `AWS_LAB_SESSION_TOKEN` | Learner Lab: copie de **AWS Details → AWS CLI**. Expiram com a sessão |
 
+Bucket do state: variável `TF_STATE_BUCKET` (no repositório ou no environment), com o
+nome do Passo 1. Sem ela, o deploy para antes do `init` dizendo o que configurar.
+
 Smoke pelo Kong (opcional; sem `KONG_URL`, o deploy pula o smoke):
 
 | Nome | Tipo | Valor |
 |---|---|---|
-| `KONG_URL` | variável | `http://<nlb-do-kong>` |
+| `KONG_URL` | variável | `http://<nlb-do-kong>`, preenchida **à mão** depois que a infra Kubernetes sobe. O hostname do NLB muda a cada criação do cluster: recriou o cluster, atualize a variável |
 | `SMOKE_CPF_ATIVO` | secret | CPF sintético `ACTIVE` do seed do ambiente |
 | `SMOKE_PROTECTED_URL` | variável | `http://<nlb-do-kong>/api/<rota de cliente>` (opcional) |
 
@@ -199,6 +214,7 @@ gh secret set AWS_LAB_ACCESS_KEY_ID --env staging
 gh secret set AWS_LAB_SECRET_ACCESS_KEY --env staging
 gh secret set AWS_LAB_SESSION_TOKEN --env staging
 gh secret set SMOKE_CPF_ATIVO --env staging
+gh variable set TF_STATE_BUCKET --body "$TF_STATE_BUCKET"
 gh variable set KONG_URL --env staging --body "http://<nlb-do-kong>"
 ```
 
@@ -226,7 +242,7 @@ ENV=staging
 TAG=manual-$(date +%Y%m%d%H%M)   # fora da sequência v<N> do CI: a tag é imutável no ECR
 
 cd infra/terraform/envs/$ENV
-terraform init
+terraform init -backend-config="bucket=$TF_STATE_BUCKET"
 terraform apply -var "image_tag=$TAG" \
   -target=module.function.aws_ecr_repository.this \
   -target=module.function.aws_ecr_lifecycle_policy.this

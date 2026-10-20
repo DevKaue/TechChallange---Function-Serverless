@@ -25,6 +25,7 @@ permissions:
 env:
   AWS_REGION: us-east-1
   ENV_NAME: ${{ github.ref == 'refs/heads/main' && 'prod' || 'staging' }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
 
 jobs:
   deploy:
@@ -68,8 +69,17 @@ jobs:
           terraform_version: '1.10.5'
           terraform_wrapper: false
 
+      # Sem a variável, o init pediria o bucket interativamente e falharia com
+      # uma mensagem que não diz o que configurar.
+      - name: Bucket do state configurado
+        run: |
+          if [ -z "$TF_STATE_BUCKET" ]; then
+            echo "::error::Defina a variável TF_STATE_BUCKET (Settings → Secrets and variables → Actions → Variables)"
+            exit 1
+          fi
+
       - name: Terraform init
-        run: terraform init -input=false
+        run: terraform init -input=false -backend-config="bucket=$TF_STATE_BUCKET"
 
       # A função precisa de uma imagem que já exista no ECR, e o ECR é criado por
       # este mesmo Terraform. Por isso o repositório sobe primeiro, sozinho.
