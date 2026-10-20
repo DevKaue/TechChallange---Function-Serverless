@@ -22,7 +22,7 @@ resource "aws_lambda_function" "this" {
     subnet_ids = data.aws_subnets.private.ids
     security_group_ids = [
       aws_security_group.function.id,
-      nonsensitive(data.aws_ssm_parameter.db_client_sg_id.value),
+      data.aws_ssm_parameter.db_client_sg_id.insecure_value,
     ]
   }
 

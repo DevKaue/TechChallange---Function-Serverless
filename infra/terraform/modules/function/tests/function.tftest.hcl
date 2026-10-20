@@ -30,7 +30,7 @@ override_data {
 override_data {
   target = data.aws_ssm_parameter.db_client_sg_id
   values = {
-    value = "sg-0c1i3n7e0000000aa"
+    insecure_value = "sg-0c1i3n7e0000000aa"
   }
 }
 
