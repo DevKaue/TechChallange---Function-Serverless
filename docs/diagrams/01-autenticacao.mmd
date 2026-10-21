@@ -1,0 +1,10 @@
+flowchart LR
+  C[Cliente] -->|POST /auth cpf| KONG[Kong no EKS<br/>plugin aws-lambda]
+  KONG -->|evento v1.0, LabRole do nó| AUTH[Lambda techchallenge-auth-env<br/>handler.handler]
+  AUTH -->|SELECT id, status, deleted_at| RDS[(RDS PostgreSQL)]
+  AUTH -.->|paths| SSM[SSM Parameter Store]
+  AUTH -->|JWT HS256 1h| KONG
+  KONG --> C
+  C -->|Bearer JWT| KONGJ[Kong<br/>plugin jwt, consumer por iss]
+  SSM -.->|mesmo segredo, via Secret do deploy do app| KONGJ
+  KONGJ --> APP[Aplicação principal no EKS<br/>revalida o token]

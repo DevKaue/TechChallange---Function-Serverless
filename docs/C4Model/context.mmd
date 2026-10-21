@@ -1,0 +1,25 @@
+graph TD
+    %% Estilos das Classes
+    classDef person fill:#084298,stroke:#052c65,stroke-width:2px,color:#ffffff,rx:10px,ry:10px;
+    classDef system fill:#1168bd,stroke:#0b4884,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+    classDef extSystem fill:#999999,stroke:#666666,stroke-width:2px,color:#ffffff,rx:8px,ry:8px;
+
+    %% Atores (Personas)
+    C["👤 <b>Cliente da oficina</b><br/><i>[Person]</i><br/>Identifica-se pelo CPF para acompanhar e aprovar os próprios serviços"]:::person
+
+    %% Sistema em foco
+    S["🔐 <b>Autenticação de cliente por CPF</b><br/><i>[Software System]</i><br/>Valida o CPF, consulta existência e status do cliente e emite JWT HS256 de 1 h"]:::system
+
+    %% Sistemas externos
+    K["🚪 <b>Kong API Gateway</b><br/><i>[Software System]</i><br/>Roteia o POST /auth para a função e valida o JWT nas rotas protegidas"]:::extSystem
+    APP["🏢 <b>Aplicação principal</b><br/><i>[Software System]</i><br/>API da oficina no EKS; revalida o token e autoriza"]:::extSystem
+    DB["🗄️ <b>Banco de dados gerenciado</b><br/><i>[Software System]</i><br/>RDS PostgreSQL com a tabela customers (repositório de banco)"]:::extSystem
+    SSM["🔑 <b>AWS SSM Parameter Store</b><br/><i>[Software System]</i><br/>Segredo JWT e contrato de descoberta do banco"]:::extSystem
+
+    %% Relacionamentos
+    C -->|"POST /auth com o CPF e, depois, chamadas com Bearer JWT"| K
+    K -->|"Invoca a função (evento v1.0)"| S
+    K -->|"Encaminha rotas protegidas com token válido"| APP
+    S -->|"Consulta id, status e deleted_at do cliente"| DB
+    S -->|"Lê o segredo JWT e os parâmetros do banco"| SSM
+    APP -->|"Lê e grava os dados da oficina"| DB

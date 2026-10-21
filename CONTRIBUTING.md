@@ -111,7 +111,7 @@ correspondente** também: ignore órfão é ruído e enfraquece o arquivo.
 3. Commits conformes ao R1; teste ao lado do código
 4. PR para `develop`, preenchendo o template — inclusive o impacto de custo
 5. Checks verdes; **squash** no merge
-6. Promoção `develop → homolog` (merge commit) dispara o deploy de homologação
+6. O merge na `develop` dispara o deploy de staging (só com `STAGING_ENABLED=true`); a promoção `develop → homolog` (merge commit) não faz deploy
 7. Promoção `homolog → main` (merge commit) para no gate de produção e espera aprovação
 
 Nada entra direto em `main`, `homolog` ou `develop`. O único commit direto da história
@@ -141,9 +141,10 @@ unitária.
 - `application/` não importa framework nem SDK
 - `infra/` concentra os adapters
 
-**Nenhum import de `aws-lambda`, `@aws-sdk/*` ou `pg` fora de `src/infra/`** — exceto
-`src/handler.ts` e `src/authorizer.handler.ts`, que são adaptadores por definição. A regra
-é aplicada por `no-restricted-imports` no ESLint.
+**`src/domain/` não importa `aws-lambda`, `@aws-sdk/*`, `pg`, `jsonwebtoken` nem nada de
+`infra/`.** A regra é aplicada por `no-restricted-imports` no ESLint, só em `src/domain/**`.
+Fora do domínio, esses imports ficam em `src/infra/` por convenção de revisão, com exceção
+de `src/handler.ts`, que é adaptador por definição.
 
 O base tem `presentation/` porque lá convivem controllers, guards, strategies e decorators
 do NestJS ao lado dos adapters de `infra/`. Numa função de uma rota, "presentation" seria

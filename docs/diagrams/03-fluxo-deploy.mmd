@@ -1,0 +1,92 @@
+graph TB
+    classDef gh fill:#fff2cc,stroke:#d6b656
+    classDef ci fill:#d5e8d4,stroke:#82b366
+    classDef deploy fill:#dae8fc,stroke:#6c8ebf
+    classDef aws fill:#ffe6cc,stroke:#d79b00
+    classDef data fill:#f8cecc,stroke:#b85450
+    classDef local fill:#f5f5f5,stroke:#666
+
+    DEV["Desenvolvedor"]
+    CLIENTE["Cliente / Internet"]
+
+    subgraph GitHubActions["GitHub Actions"]
+        direction TB
+
+        subgraph CI["ci.yml - PR e push em develop/homolog/main"]
+            direction TB
+            C1["commits (só PR)<br/>título do PR em<br/>Conventional Commits"]
+            C2["qualidade<br/>typecheck + lint --max-warnings=0<br/>+ build + Jest com cobertura"]
+            C3["seguranca<br/>npm audit + sem chave estática<br/>+ nenhum CPF em src"]
+            C4["terraform<br/>fmt + validate staging/prod<br/>+ terraform test (provider mockado)"]
+            C5["imagem<br/>docker build + evento v1.0<br/>contra o RIE: espera 503 de bootstrap"]
+        end
+
+        subgraph DEPLOY["deploy.yml - push em develop (staging) e main (production)"]
+            direction TB
+            D1["1. Resolver a tag<br/>v&lt;run_number&gt; ou image_tag do dispatch"]
+            D2["2. Credenciais AWS<br/>OIDC (AWS_DEPLOY_ROLE) ou lab (AWS_LAB_*)"]
+            D3["3. terraform init<br/>bucket de TF_STATE_BUCKET<br/>state lambda/&lt;env&gt;/terraform.tfstate"]
+            D4["4. Garantir o ECR<br/>apply -target do repositório e lifecycle"]
+            D5["5. Login no ECR"]
+            D6["6. Build + push<br/>--provenance=false"]
+            D7["7. terraform apply<br/>-var image_tag"]
+            D8["8. aws lambda wait<br/>function-updated-v2"]
+            D9["9. Smoke pelo Kong<br/>só com KONG_URL no environment"]
+        end
+    end
+
+    subgraph AWS["AWS"]
+        direction TB
+        ECR[("Amazon ECR<br/>techchallenge-auth-&lt;env&gt;<br/>tag imutável, 10 últimas")]
+        FN["Lambda techchallenge-auth-&lt;env&gt;<br/>imagem, 256 MB, timeout 9 s<br/>subnets privadas, LabRole"]
+        LOGS["CloudWatch Logs<br/>/aws/lambda/techchallenge-auth-&lt;env&gt;<br/>retenção 14 dias"]
+        SSM["SSM Parameter Store<br/>/techchallenge/&lt;env&gt;/auth/jwt-secret<br/>/techchallenge/&lt;env&gt;/db/*"]
+        KONG["Kong no EKS<br/>plugin aws-lambda"]
+        RDS[("RDS PostgreSQL<br/>repositório de banco")]
+    end
+
+    S3[("S3 TF_STATE_BUCKET<br/>state do Terraform")]
+
+    subgraph LOCAL["Desenvolvimento local"]
+        LT["npm test + npm run test:integration"]
+        LDB[("Postgres 15.19<br/>:5432 em Docker")]
+        RIE["docker run da imagem<br/>Runtime Interface Emulator :9000"]
+    end
+
+    DEV -->|"PR / push"| CI
+    DEV -->|"merge em develop ou main"| DEPLOY
+    DEV -->|"workflow_dispatch com image_tag (rollback)"| D1
+
+    C2 ~~~ C3
+    C4 ~~~ C5
+
+    D1 --> D2 --> D3
+    D3 -->|"build novo"| D4 --> D5 --> D6 --> D7
+    D3 -->|"rollback: sem build"| D7
+    D7 --> D8 --> D9
+
+    D3 -.->|"state e lock"| S3
+    D6 -->|"push"| ECR
+    D7 -->|"image_uri"| FN
+    ECR -.->|"pull da imagem"| FN
+    FN -->|"logs JSON"| LOGS
+    FN -->|"GetParameter no primeiro request"| SSM
+    FN -->|"SQL/TLS 5432"| RDS
+    KONG -->|"Invoke"| FN
+    D9 -->|"POST /auth"| KONG
+    CLIENTE -->|"POST /auth"| KONG
+
+    DEV -->|"npm run db:it:up / docker run"| LOCAL
+    LT --> LDB
+
+    style GitHubActions fill:#fbfbfb,stroke:#999,stroke-dasharray:3
+    style AWS fill:#fdf4ec,stroke:#999,stroke-dasharray:3
+    style CI fill:#f3f9f3
+    style DEPLOY fill:#f3f7fb
+
+    class DEV,CLIENTE gh
+    class C1,C2,C3,C4,C5 ci
+    class D1,D2,D3,D4,D5,D6,D7,D8,D9 deploy
+    class ECR,FN,LOGS,SSM,KONG aws
+    class RDS,S3 data
+    class LT,LDB,RIE local

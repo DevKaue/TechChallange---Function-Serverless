@@ -1,0 +1,40 @@
+{
+  "name": "techchallenge-auth-lambda",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Function Serverless de autenticação por CPF — Tech Challenge Fase 3",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.build.json",
+    "lint": "eslint \"src/**/*.ts\" --max-warnings=0",
+    "test": "jest",
+    "test:ci": "jest --coverage --runInBand",
+    "test:integration": "jest -c jest.integration.config.js --runInBand",
+    "db:it:up": "docker run -d --rm --name techchallenge-pg-it -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:15.19-alpine",
+    "db:it:down": "docker stop techchallenge-pg-it"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/aws-lambda": "^8.10.152",
+    "@types/jest": "^30.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.15.5",
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
+    "eslint": "^9.17.0",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.14",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ssm": "^3.1138.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.16.3"
+  }
+}
