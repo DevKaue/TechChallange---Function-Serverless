@@ -437,10 +437,13 @@ cd infra/terraform/modules/function && terraform init -backend=false && terrafor
 
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) roda no push para `develop`
 (staging) e para `main` (prod). A `homolog` não faz deploy, como nos outros três
-repositórios:
+repositórios. O staging só roda com a variável `STAGING_ENABLED=true`: enquanto o
+staging da infra estiver desligado para economizar crédito, o push na `develop`
+fica pulado em vez de falhar.
 
 1. Cria o repositório ECR, se ainda não existir.
-2. Builda e publica a imagem com a tag `v<run_number>`.
+2. Builda e publica a imagem com a tag `v<run_number>`. Num re-run a tag é a
+   mesma, então a imagem já publicada é reaproveitada.
 3. Aplica o Terraform do ambiente com essa tag e espera a função ficar ativa.
 4. Roda o smoke pelo Kong, quando `KONG_URL` está configurada no environment.
 
