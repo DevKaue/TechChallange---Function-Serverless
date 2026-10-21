@@ -109,6 +109,17 @@ jobs:
             exit 1
           fi
 
+      - name: Chave do AWS Academy só com session token
+        run: |
+          # O AWS Academy não permite criar a role do OIDC, e o deploy aceita as
+          # credenciais do lab como alternativa. Elas só são aceitáveis porque são
+          # TEMPORÁRIAS: sem session token, uma chave ali seria de usuário IAM,
+          # válida para sempre.
+          for f in $(grep -rlE '^[[:space:]]*aws-access-key-id:' .github/workflows/ || true); do
+            grep -qE 'aws-session-token:[[:space:]]*\$\{\{ *secrets\.AWS_LAB_SESSION_TOKEN' "$f" || {
+              echo "::error file=$f::aws-access-key-id sem aws-session-token do lab"; exit 1; }
+          done
+
       - name: Nenhum CPF em código de produção
         run: |
           # O risco real é CPF virar DADO em código de produção: literal
@@ -126,3 +137,59 @@ jobs:
             echo "::error::sequencia de 11 digitos em codigo de producao"
             exit 1
           fi
+
+  terraform:
+    name: Terraform da função
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: '1.10.5'
+          terraform_wrapper: false
+
+      - name: Formatação
+        run: terraform fmt -check -recursive infra/terraform
+
+      - name: Validate dos ambientes
+        run: |
+          for env in staging prod; do
+            terraform -chdir=infra/terraform/envs/$env init -backend=false -input=false
+            terraform -chdir=infra/terraform/envs/$env validate
+          done
+
+      # Provider mockado: sem credencial, sem criar nada. Prova nome da função,
+      # LabRole, paths do SSM e rede, que são contrato com o Kong e os outros repos.
+      - name: Testes do módulo
+        working-directory: infra/terraform/modules/function
+        run: terraform init -backend=false -input=false && terraform test
+
+  imagem:
+    name: Imagem e invocação local
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build da imagem
+        run: docker build --provenance=false -t techchallenge-auth:ci .
+
+      # A imagem base da Lambda traz o Runtime Interface Emulator. Sem AWS, o
+      # bootstrap falha no SSM, e o contrato manda responder 503 com
+      # correlationId, não estourar. Isso prova, na imagem real, que o handler
+      # está no CMD certo, que o bundle de CAs existe e que o evento v1.0 do Kong
+      # é aceito.
+      - name: Evento v1.0 do Kong contra a imagem
+        run: |
+          docker run -d --name fn -p 9000:8080 \
+            -e APP_ENV=ci -e JWT_SECRET_SSM_PATH=/ci/auth/jwt-secret -e DB_SSM_PREFIX=/ci/db \
+            -e AWS_REGION=us-east-1 -e AWS_EC2_METADATA_DISABLED=true \
+            techchallenge-auth:ci
+          docker exec fn test -s /var/task/certs/global-bundle.pem
+          for i in $(seq 1 20); do curl -s -o /dev/null localhost:9000 && break; sleep 1; done
+          body=$(printf '{"cpf":"11144477735"}' | base64 -w0)
+          curl -sS -o resp.json localhost:9000/2015-03-31/functions/function/invocations \
+            -d "{\"httpMethod\":\"POST\",\"path\":\"/auth\",\"headers\":{\"x-correlation-id\":\"ci-kong#1\"},\"body\":\"${body}\",\"isBase64Encoded\":true,\"requestContext\":{\"requestId\":\"ci-req\"}}"
+          cat resp.json; echo
+          jq -e '.statusCode == 503 and .headers["x-correlation-id"] == "ci-kong#1" and (.body | fromjson | .error == "service_unavailable")' resp.json
+          docker logs fn 2>&1 | grep -q '"event":"bootstrap.error"'

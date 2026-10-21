@@ -1,0 +1,127 @@
+name: Deploy
+
+# develop publica techchallenge-auth-staging; main publica techchallenge-auth-prod.
+# A homolog não faz deploy: é o mesmo modelo da infra Kubernetes, do app e do
+# banco, e com ela nos gatilhos cada promoção publicaria o staging duas vezes,
+# às vezes com commits diferentes.
+# São os únicos nomes que o Kong tem permissão de invocar (ADR-002).
+on:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Tag já publicada para reimplantar (rollback), ex.: v12. Vazio = build novo.'
+        required: false
+
+# Um deploy por ambiente de cada vez, sem cancelar o que está rodando: matar um
+# apply no meio deixa o lock do state preso e a função entre duas versões.
+concurrency:
+  group: deploy-${{ github.ref == 'refs/heads/main' && 'prod' || 'staging' }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ENV_NAME: ${{ github.ref == 'refs/heads/main' && 'prod' || 'staging' }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+
+jobs:
+  deploy:
+    name: Imagem, Terraform e smoke
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    defaults:
+      run:
+        working-directory: infra/terraform/envs/${{ github.ref == 'refs/heads/main' && 'prod' || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Resolver a tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "versao=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "versao=v${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # OIDC quando o environment tem AWS_DEPLOY_ROLE. No AWS Academy não há como
+      # criar a role nem o provider OIDC, então valem as credenciais TEMPORÁRIAS
+      # do lab (com session token), que expiram com a sessão. Preencha um dos dois
+      # conjuntos, nunca os dois: com ambos, a action assume a role usando as
+      # chaves do lab.
+      - name: Credenciais AWS (OIDC ou lab)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE }}
+          aws-access-key-id: ${{ secrets.AWS_LAB_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_LAB_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_LAB_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: '1.10.5'
+          terraform_wrapper: false
+
+      # Sem a variável, o init pediria o bucket interativamente e falharia com
+      # uma mensagem que não diz o que configurar.
+      - name: Bucket do state configurado
+        run: |
+          if [ -z "$TF_STATE_BUCKET" ]; then
+            echo "::error::Defina a variável TF_STATE_BUCKET (Settings → Secrets and variables → Actions → Variables)"
+            exit 1
+          fi
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config="bucket=$TF_STATE_BUCKET"
+
+      # A função precisa de uma imagem que já exista no ECR, e o ECR é criado por
+      # este mesmo Terraform. Por isso o repositório sobe primeiro, sozinho.
+      - name: Garantir o repositório da imagem
+        if: steps.tag.outputs.build == 'true'
+        run: |
+          terraform apply -input=false -auto-approve \
+            -target=module.function.aws_ecr_repository.this \
+            -target=module.function.aws_ecr_lifecycle_policy.this \
+            -var "image_tag=${{ steps.tag.outputs.versao }}"
+
+      - name: Login no ECR
+        id: ecr
+        if: steps.tag.outputs.build == 'true'
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Build e push da imagem
+        if: steps.tag.outputs.build == 'true'
+        working-directory: .
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/techchallenge-auth-${{ env.ENV_NAME }}:${{ steps.tag.outputs.versao }}
+        run: |
+          # --provenance=false: a Lambda recusa image index com attestation
+          # ("image manifest media type not supported").
+          docker build --provenance=false -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Terraform apply
+        run: terraform apply -input=false -auto-approve -var "image_tag=${{ steps.tag.outputs.versao }}"
+
+      - name: Aguardar a função ficar ativa
+        run: aws lambda wait function-updated-v2 --function-name "techchallenge-auth-${ENV_NAME}"
+
+      # Pelo Kong, que é o caminho real do cliente. Só roda com as variáveis do
+      # environment preenchidas: antes da infra Kubernetes subir não há gateway.
+      - name: Smoke pelo Kong
+        if: vars.KONG_URL != ''
+        working-directory: .
+        env:
+          API_URL: ${{ vars.KONG_URL }}
+          CPF_ATIVO: ${{ secrets.SMOKE_CPF_ATIVO }}
+          PROTECTED_URL: ${{ vars.SMOKE_PROTECTED_URL }}
+        run: test/e2e/smoke-auth.sh

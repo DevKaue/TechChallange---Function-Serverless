@@ -1,0 +1,56 @@
+sequenceDiagram
+    autonumber
+    actor C as Cliente
+    participant K as Kong (EKS)
+    participant L as Lambda techchallenge-auth-{env}
+    participant S as SSM Parameter Store
+    participant DB as RDS PostgreSQL
+    participant A as Aplicação principal (EKS)
+
+    C->>K: POST /auth {"cpf": "..."}
+    K->>K: rate-limiting (10/min por IP) e X-Correlation-ID (uuid e contador)
+    K->>L: Invoke (plugin aws-lambda, evento v1.0, body em base64, LabRole do nó)
+
+    opt primeira invocação do container
+        L->>S: GetParameter jwt-secret e db/host, port, name, username, password
+        alt SSM, configuração ou bundle de CA com falha
+            L-->>K: 503 service_unavailable + correlationId (log bootstrap.error)
+            K-->>C: 503
+        else dependências montadas
+            S-->>L: valores (cache por container)
+            L->>L: abre o Pool pg (max 1, TLS com a CA do RDS)
+        end
+    end
+
+    L->>L: valida formato e dígitos verificadores do CPF, antes de qualquer I/O
+    alt CPF inválido ou JSON malformado
+        L-->>K: 400 invalid_request "CPF inválido" (banco não é consultado)
+        K-->>C: 400
+    else CPF válido
+        L->>DB: SELECT id, status, deleted_at FROM customers WHERE document = $1 AND document_type = 'CPF'
+        alt banco indisponível, timeout ou tabela ausente
+            DB--xL: erro (ex.: 42P01, 57014, timeout de conexão)
+            L-->>K: 503 service_unavailable + correlationId (log db.error)
+            K-->>C: 503
+        else não cadastrado, arquivado, INACTIVE ou BLOCKED
+            DB-->>L: nenhuma linha ou cliente inelegível
+            L-->>K: 401 unauthorized "CPF não autorizado" (motivo só no log auth.denied)
+            K-->>C: 401
+        else cliente ACTIVE e não arquivado
+            DB-->>L: id, status ACTIVE, deleted_at nulo
+            L->>L: assina JWT HS256 (sub, type customer, iss techchallenge-auth-lambda, jti, exp 1 h)
+            L-->>K: 200 {access_token, token_type Bearer, expires_in 3600}
+            K-->>C: 200 + x-correlation-id
+        end
+    end
+
+    C->>K: requisição em rota protegida /api (Authorization: Bearer token)
+    K->>K: plugin jwt: consumer escolhido pelo iss, assinatura HS256 e exp
+    alt token ausente, adulterado ou expirado
+        K-->>C: 401 (a requisição não chega à aplicação)
+    else token válido
+        K->>A: encaminha com X-Correlation-ID
+        A->>A: revalida o token (aceitar type customer é pendência da RFC-001 da aplicação)
+        A-->>K: resposta da rota
+        K-->>C: resposta da rota
+    end

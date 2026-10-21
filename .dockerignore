@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+infra
+test
+docs
+.git
+.github
+*.md

@@ -30,7 +30,7 @@ updates:
 
   - package-ecosystem: terraform
     directories:
-      - /infra/terraform/envs/homolog
+      - /infra/terraform/envs/staging
       - /infra/terraform/envs/prod
     schedule:
       interval: weekly

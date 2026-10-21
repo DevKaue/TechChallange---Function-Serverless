@@ -1,0 +1,241 @@
+openapi: 3.0.3
+info:
+  title: Autenticação de cliente por CPF
+  version: 0.1.0
+  description: |
+    Contrato HTTP da função `techchallenge-auth-<env>`, publicado pelo Kong em `POST /auth`.
+
+    A função não é NestJS, então este documento é escrito à mão e precisa acompanhar
+    `src/infra/http/auth-http.handler.ts` e os contratos versionados em `contracts/`
+    (`auth-response.schema.json`, `customer-access-token.schema.json` e `errors.json`), que
+    são a fonte de verdade validada em teste.
+
+    O Kong invoca a função pelo plugin `aws-lambda` (evento REST v1.0, `is_proxy_integration`),
+    então o status, os headers e o corpo abaixo são exatamente os que a função devolve. O 429
+    é a única resposta produzida pelo próprio Kong.
+
+    O 401 é deliberadamente idêntico para CPF não cadastrado e para cliente arquivado,
+    inativo ou bloqueado: diferenciar permitiria enumerar CPFs. O motivo real fica no log
+    estruturado, correlacionado pelo `correlationId`.
+
+    Os CPFs dos exemplos são sintéticos, os mesmos da massa de teste do repositório.
+  license:
+    name: MIT
+servers:
+  - url: http://{kongHost}
+    description: Proxy do Kong (NLB criado pelo repositório de infraestrutura Kubernetes). Sem TLS até haver domínio e certificado.
+    variables:
+      kongHost:
+        default: localhost:8000
+        description: DNS do NLB do Kong do ambiente, ou o endereço de um port-forward do proxy.
+tags:
+  - name: Autenticação
+    description: Emissão do JWT de cliente a partir do CPF.
+paths:
+  /auth:
+    post:
+      tags: [Autenticação]
+      operationId: authenticateCustomer
+      summary: Autentica o cliente pelo CPF e emite um JWT de 1 hora
+      description: |
+        Valida o formato e os dígitos verificadores do CPF antes de qualquer I/O, consulta a
+        existência e o status do cliente (`ACTIVE` e não arquivado) e devolve um JWT HS256.
+
+        Formatos aceitos: 11 dígitos (`11144477735`) ou com máscara (`111.444.777-35`), com
+        espaços nas pontas tolerados. Qualquer outro formato, valor não-string (inclusive
+        número JSON), dígitos repetidos ou dígito verificador incorreto devolve 400 sem tocar
+        no banco.
+
+        O Kong aplica rate limiting de 10 requisições por minuto por IP nesta rota.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRequest'
+            examples:
+              semMascara:
+                summary: CPF com 11 dígitos
+                value:
+                  cpf: '11144477735'
+              comMascara:
+                summary: CPF com máscara
+                value:
+                  cpf: 111.444.777-35
+      responses:
+        '200':
+          description: CPF válido e cliente existente e elegível.
+          headers:
+            x-correlation-id:
+              $ref: '#/components/headers/XCorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                access_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.<payload>.<assinatura>
+                token_type: Bearer
+                expires_in: 3600
+        '400':
+          description: |
+            CPF em formato inválido, com dígito verificador incorreto, ausente, não-string ou
+            corpo JSON malformado. O banco não é consultado.
+          headers:
+            x-correlation-id:
+              $ref: '#/components/headers/XCorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: invalid_request
+                message: CPF inválido
+                correlationId: 0f6c3d2e-6a1b-4c39-9a4e-0d7f5b2c8e11#12
+        '401':
+          description: |
+            Cliente não cadastrado ou não elegível (arquivado, `INACTIVE` ou `BLOCKED`). As duas
+            situações são indistinguíveis de propósito.
+          headers:
+            x-correlation-id:
+              $ref: '#/components/headers/XCorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: unauthorized
+                message: CPF não autorizado
+                correlationId: 0f6c3d2e-6a1b-4c39-9a4e-0d7f5b2c8e11#12
+        '429':
+          description: |
+            Limite do plugin `rate-limiting` do Kong excedido (10/min por IP). Gerado pelo
+            gateway: a função não é invocada e o corpo segue o formato do Kong.
+        '500':
+          description: |
+            Erro inesperado na função, tratado: a exceção não escapa como erro do gateway e o
+            detalhe nunca vai para o corpo nem para o log.
+          headers:
+            x-correlation-id:
+              $ref: '#/components/headers/XCorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: internal_error
+                message: Erro interno
+                correlationId: 0f6c3d2e-6a1b-4c39-9a4e-0d7f5b2c8e11#12
+        '503':
+          description: |
+            Dependência indisponível: falha ao montar a função no primeiro request (SSM,
+            configuração, bundle de CA ou segredo JWT curto) ou banco fora, com timeout ou sem
+            a tabela `customers`. Nunca vira 200: sem banco, nenhum token é emitido.
+          headers:
+            x-correlation-id:
+              $ref: '#/components/headers/XCorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: service_unavailable
+                message: Serviço temporariamente indisponível
+                correlationId: 0f6c3d2e-6a1b-4c39-9a4e-0d7f5b2c8e11#12
+components:
+  parameters:
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      description: |
+        Id de correlação. O plugin `correlation-id` do Kong preenche no formato
+        `<uuid>#<contador>` quando o cliente não envia. Valor fora do padrão (caracteres além de
+        letras, dígitos e `._:#-`, ou mais de 128 caracteres) é descartado e substituído pelo
+        `requestId` do evento.
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9._:#-]{1,128}$'
+      example: 0f6c3d2e-6a1b-4c39-9a4e-0d7f5b2c8e11#12
+  headers:
+    XCorrelationId:
+      description: Id de correlação efetivamente usado no log da função (o recebido, se válido, ou o `requestId`).
+      schema:
+        type: string
+  schemas:
+    AuthRequest:
+      type: object
+      required: [cpf]
+      properties:
+        cpf:
+          type: string
+          description: CPF com 11 dígitos ou no formato `000.000.000-00`. Espaços nas pontas são removidos.
+          pattern: '^\s*(\d{11}|\d{3}\.\d{3}\.\d{3}-\d{2})\s*$'
+          example: '11144477735'
+    AuthResponse:
+      description: Espelho de `contracts/auth-response.schema.json`.
+      type: object
+      additionalProperties: false
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+          minLength: 1
+          description: JWT HS256. O payload segue `CustomerAccessTokenPayload`.
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          enum: [3600]
+          description: Validade em segundos. Sempre o número 3600, nunca a string `1h`.
+    ErrorResponse:
+      description: Formato único de erro da função. Os pares `error` e `message` estão em `contracts/errors.json`.
+      type: object
+      additionalProperties: false
+      required: [error, message, correlationId]
+      properties:
+        error:
+          type: string
+          enum: [invalid_request, unauthorized, internal_error, service_unavailable]
+        message:
+          type: string
+          enum:
+            - CPF inválido
+            - CPF não autorizado
+            - Erro interno
+            - Serviço temporariamente indisponível
+        correlationId:
+          type: string
+          description: O mesmo valor do header `x-correlation-id`; é a chave para achar o motivo real no log.
+    CustomerAccessTokenPayload:
+      description: |
+        Payload do `access_token`, espelho de `contracts/customer-access-token.schema.json`.
+        Não carrega CPF, nome, e-mail, telefone, status nem `role`. O plugin `jwt` do Kong
+        escolhe o consumer pela claim `iss` e confere `exp`.
+      type: object
+      additionalProperties: false
+      required: [sub, type, iss, jti, iat, exp]
+      properties:
+        sub:
+          type: string
+          format: uuid
+          description: Id do cliente na tabela `customers`.
+        type:
+          type: string
+          enum: [customer]
+        iss:
+          type: string
+          enum: [techchallenge-auth-lambda]
+        jti:
+          type: string
+          format: uuid
+        iat:
+          type: integer
+          minimum: 0
+        exp:
+          type: integer
+          minimum: 1
+          description: '`iat` + 3600.'

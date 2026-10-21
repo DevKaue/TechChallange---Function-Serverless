@@ -4,7 +4,12 @@ export type AuthLogEvent =
   | 'auth.denied'
   | 'auth.invalid_cpf'
   | 'db.error'
-  | 'auth.error';
+  | 'db.pool_error'
+  | 'auth.error'
+  | 'bootstrap.error'
+  | 'authz.allowed'
+  | 'authz.denied'
+  | 'authz.error';
 
 export interface AuthLogEntry {
   event: AuthLogEvent;
