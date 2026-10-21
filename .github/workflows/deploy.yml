@@ -32,6 +32,10 @@ env:
 jobs:
   deploy:
     name: Imagem, Terraform e smoke
+    # O staging da infra fica desligado para economizar crédito do Academy; sem
+    # VPC e sem os parâmetros do banco, o push na develop só geraria run vermelho.
+    # Mesmo gate da infra Kubernetes: crie STAGING_ENABLED=true quando subir o staging.
+    if: github.ref == 'refs/heads/main' || vars.STAGING_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
     defaults:
@@ -103,7 +107,15 @@ jobs:
         working-directory: .
         env:
           IMAGE: ${{ steps.ecr.outputs.registry }}/techchallenge-auth-${{ env.ENV_NAME }}:${{ steps.tag.outputs.versao }}
+          VERSAO: ${{ steps.tag.outputs.versao }}
         run: |
+          # O re-run de um deploy repete o run_number, então a tag é a mesma e o
+          # ECR imutável recusaria o push. É o mesmo commit: reaproveita a imagem.
+          if aws ecr describe-images --repository-name "techchallenge-auth-${ENV_NAME}" \
+               --image-ids imageTag="$VERSAO" >/dev/null 2>&1; then
+            echo "Imagem $VERSAO já publicada; reaproveitando"
+            exit 0
+          fi
           # --provenance=false: a Lambda recusa image index com attestation
           # ("image manifest media type not supported").
           docker build --provenance=false -t "$IMAGE" .

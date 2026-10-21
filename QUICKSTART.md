@@ -223,8 +223,10 @@ gh variable set KONG_URL --env staging --body "http://<nlb-do-kong>"
 
 ### Passo 3 — primeiro deploy
 
-O deploy de staging dispara sozinho no merge para `develop`; o de prod, no
-merge para `main`, parando no gate do environment `production`. Para disparar à mão:
+O deploy de staging dispara sozinho no merge para `develop` quando a variável
+`STAGING_ENABLED` vale `true` (sem ela o job é pulado, porque o staging da infra
+fica desligado); o de prod, no merge para `main`, parando no gate do environment
+`production`. Para disparar à mão:
 
 ```bash
 gh workflow run deploy.yml --ref develop
