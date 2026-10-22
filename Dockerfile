@@ -19,6 +19,10 @@ FROM public.ecr.aws/lambda/nodejs:22
 # `pg` cairia em `rejectUnauthorized: false` ou falharia o TLS com o RDS. É o
 # caminho padrão de RDS_CA_BUNDLE_PATH (src/infra/database/database-settings.ts).
 ADD --chmod=444 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem ${LAMBDA_TASK_ROOT}/certs/global-bundle.pem
+# O ADD aplica o 444 também ao diretório `certs/` que ele cria, sem o bit x. A
+# Lambda roda a função com usuário sem privilégio: sem o x ele não entra no
+# diretório, o readFileSync do bundle devolve EACCES e todo POST /auth vira 503.
+RUN chmod 755 ${LAMBDA_TASK_ROOT}/certs
 
 COPY --from=build /build/node_modules ${LAMBDA_TASK_ROOT}/node_modules
 COPY --from=build /build/dist ${LAMBDA_TASK_ROOT}/
