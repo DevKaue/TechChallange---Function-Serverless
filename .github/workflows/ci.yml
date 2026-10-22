@@ -186,6 +186,11 @@ jobs:
             -e AWS_REGION=us-east-1 -e AWS_EC2_METADATA_DISABLED=true \
             techchallenge-auth:ci
           docker exec fn test -s /var/task/certs/global-bundle.pem
+          # O `docker exec` acima roda como root e passa mesmo com o diretório sem
+          # o bit x. A Lambda real roda sem privilégio, então a leitura é provada
+          # com um usuário qualquer diferente de root.
+          docker run --rm --user 1000 --entrypoint sh techchallenge-auth:ci \
+            -c 'head -c1 /var/task/certs/global-bundle.pem >/dev/null'
           for i in $(seq 1 20); do curl -s -o /dev/null localhost:9000 && break; sleep 1; done
           body=$(printf '{"cpf":"11144477735"}' | base64 -w0)
           curl -sS -o resp.json localhost:9000/2015-03-31/functions/function/invocations \
