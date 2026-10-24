@@ -16,10 +16,12 @@ repositório-base das Fases 1 e 2:
 | [TechChallenge---Infraestrutura-Kubernetes-com-Terraform](https://github.com/DevKaue/TechChallenge---Infraestrutura-Kubernetes-com-Terraform) | EKS, Kong e o segredo JWT no SSM |
 | [tech-challenge-database-infra](https://github.com/DevKaue/tech-challenge-database-infra) | Banco de dados gerenciado (Terraform) |
 | [TechChallange](https://github.com/DevKaue/TechChallange) | Repositório-base: aplicação principal em Kubernetes (Fases 1 e 2) |
+| [tech-challenge-docs](https://github.com/Jean-Carlo-Torres/tech-challenge-docs) | Documentação arquitetural geral: componentes, sequências, RFCs, ADRs e modelo de dados |
 
-> **Status: código, imagem, Terraform e workflow de deploy prontos; primeiro deploy
-> pendente.** O apply depende da infra Kubernetes (VPC, segredo JWT no SSM) e do banco do
-> mesmo ambiente estarem no ar.
+> **Status: código, imagem, Terraform e workflow de deploy prontos.** O apply depende da
+> infra Kubernetes (VPC, segredo JWT no SSM) e do banco do mesmo ambiente estarem no ar.
+> O ambiente AWS (AWS Academy) não está de pé no momento — ver
+> [Links dos deploys](#links-dos-deploys).
 
 ## Contexto do projeto
 
@@ -508,6 +510,26 @@ curl -s -X POST http://<nlb-do-kong>/auth \
   -d '{"cpf":"111.444.777-35"}'
 ```
 
+### Links dos deploys
+
+A função não tem URL própria: ela é exposta **somente pelo Kong**, em
+`POST http://<KONG_URL>/auth`. O `<KONG_URL>` é o hostname do NLB do Kong, gerado a cada
+provisionamento da infra Kubernetes:
+
+```bash
+kubectl -n kong get svc kong-gateway-proxy -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+```
+
+| Ambiente | Função | Endpoint |
+|---|---|---|
+| staging (`develop`) | `techchallenge-auth-staging` | `POST http://<KONG_URL-staging>/auth` |
+| produção (`main`) | `techchallenge-auth-prod` | `POST http://<KONG_URL-prod>/auth` |
+
+> **Deploy ativo:** o ambiente AWS (AWS Academy Learner Lab) **não está de pé no
+> momento**, então não há link público fixo. Para testar sem a AWS, use a invocação local
+> da imagem (seção [Imagem](#imagem)) ou a requisição "Invocação local" da coleção Postman.
+> No GitHub, a variável `KONG_URL` do environment guarda o endereço usado pelo smoke.
+
 ### Rotas protegidas
 
 Quem valida o token nas rotas protegidas é o plugin `jwt` do Kong, que escolhe o consumer
@@ -616,6 +638,7 @@ Premissas e limites da estimativa:
 
 ## Documentação
 
+- [tech-challenge-docs](https://github.com/Jean-Carlo-Torres/tech-challenge-docs) — documentação arquitetural geral do projeto
 - [QUICKSTART.md](QUICKSTART.md) — passo a passo local e AWS, e o que fazer quando der errado
 - [ADRs](docs/ADRs) — decisões arquiteturais permanentes
 - [RFCs](docs/RFCs) — propostas técnicas
