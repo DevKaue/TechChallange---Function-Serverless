@@ -127,33 +127,10 @@ jobs:
       - name: Aguardar a função ficar ativa
         run: aws lambda wait function-updated-v2 --function-name "techchallenge-auth-${ENV_NAME}"
 
-      # Garante o cliente sintético que o smoke usa como "cliente ativo".
-      # Idempotente: ON CONFLICT DO NOTHING. Roda no pod da API, que já tem
-      # o DATABASE_URL e o driver pg.
-      - name: Seed do cliente de smoke
-        if: vars.KONG_URL != ''
-        env:
-          CPF_ATIVO: ${{ secrets.SMOKE_CPF_ATIVO }}
-          CLUSTER: ${{ vars.EKS_CLUSTER_NAME }}
-        run: |
-          CLUSTER="${CLUSTER:-techchallenge-$ENV_NAME}"
-          aws eks update-kubeconfig --name "$CLUSTER" --region us-east-1
-          kubectl -n techchallenge rollout status deploy/techchallenge-api --timeout=180s
-          kubectl -n techchallenge exec -i deploy/techchallenge-api -c api -- node - "$CPF_ATIVO" <<'EOF'
-          const { Client } = require("pg");
-          (async () => {
-            const c = new Client({ connectionString: process.env.DATABASE_URL });
-            await c.connect();
-            const r = await c.query(
-              "INSERT INTO customers (id, document, document_type, name, status, updated_at) VALUES (gen_random_uuid()::text, $1, $2, $3, $4, now()) ON CONFLICT (document, document_type) DO NOTHING",
-              [process.argv[2], "CPF", "Cliente Smoke (sintético)", "ACTIVE"]);
-            console.log("linhas inseridas:", r.rowCount);
-            await c.end();
-          })().catch(e => { console.error("erro:", e.name); process.exit(1); });
-          EOF
-
       # Pelo Kong, que é o caminho real do cliente. Só roda com as variáveis do
       # environment preenchidas: antes da infra Kubernetes subir não há gateway.
+      # O cliente "ativo" do smoke (SMOKE_CPF_ATIVO) é criado pelo deploy da
+      # aplicação, que roda antes desta Lambda; aqui ele só é consumido.
       - name: Smoke pelo Kong
         if: vars.KONG_URL != ''
         working-directory: .
