@@ -145,7 +145,8 @@ função, a LabRole, os paths do SSM e a rede — o que o Kong e os outros repos
      **Sem o banco aplicado, o plan desta função falha**: o Terraform lê o
      `client-sg-id` do SSM para anexar o SG de cliente à função.
   3. [Aplicação](https://github.com/DevKaue/tech-challenge-app-): migrations aplicadas (a
-     tabela `customers` com a coluna `status`) e um cliente sintético `ACTIVE` no seed, para
+     tabela `customers` com a coluna `status`) e o cliente sintético `ACTIVE`, que o deploy da
+     aplicação cria a partir do secret `SMOKE_CPF_ATIVO` (o mesmo valor deste repositório), para
      o smoke.
 
 Confira sem imprimir nenhum valor secreto:
@@ -204,7 +205,7 @@ Smoke pelo Kong (opcional; sem `KONG_URL`, o deploy pula o smoke):
 | Nome | Tipo | Valor |
 |---|---|---|
 | `KONG_URL` | variável | `http://<nlb-do-kong>`, preenchida **à mão** depois que a infra Kubernetes sobe. O hostname do NLB muda a cada criação do cluster: recriou o cluster, atualize a variável |
-| `SMOKE_CPF_ATIVO` | secret | CPF sintético `ACTIVE` do seed do ambiente |
+| `SMOKE_CPF_ATIVO` | secret | CPF sintético `ACTIVE`, criado pelo deploy da aplicação; o valor é o mesmo nos dois repositórios |
 | `SMOKE_PROTECTED_URL` | variável | `http://<nlb-do-kong>/api/<rota de cliente>` (opcional) |
 
 Pelo `gh`, sem `--body` nos secrets, para o valor não ficar no histórico do shell:
